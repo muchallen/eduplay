@@ -124,6 +124,7 @@ eduplay:
     access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
   refresh-token:
     ttl: ${REFRESH_TOKEN_TTL:30d}
+    reuse-grace: ${REFRESH_TOKEN_REUSE_GRACE:60s}
   password-reset:
     ttl: ${PASSWORD_RESET_TTL:30m}
   email-verification:
@@ -138,9 +139,13 @@ eduplay:
     expiry-cron: ${SUBSCRIPTION_EXPIRY_CRON:0 */15 * * * *}
   children:
     max-per-parent: ${MAX_CHILDREN_PER_PARENT:10}
+    max-per-teacher: ${MAX_CHILDREN_PER_TEACHER:300}
+  grades:
+    allowed: ${GRADES:ecd_a,ecd_b}
   report:
-    strong-score-threshold: ${REPORT_STRONG_SCORE_THRESHOLD:8.0}
-    weak-score-threshold: ${REPORT_WEAK_SCORE_THRESHOLD:5.0}
+    # Scores are percent correct (0-100).
+    strong-score-threshold: ${REPORT_STRONG_SCORE_THRESHOLD:80}
+    weak-score-threshold: ${REPORT_WEAK_SCORE_THRESHOLD:50}
     min-games-for-rating: ${REPORT_MIN_GAMES_FOR_RATING:3}
     recent-activity-limit: 10
   cors:
@@ -169,6 +174,9 @@ eduplay:
       window: 1h
     email-verification-per-account:
       capacity: 3
+      window: 1h
+    class-join-per-account:
+      capacity: 10
       window: 1h
 
 logging:

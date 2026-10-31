@@ -81,6 +81,7 @@ public class SecurityConfig {
                         .requestMatchers(PUBLIC_DOCS).permitAll()
                         .requestMatchers("/livez", "/readyz", "/error").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/classes", "/api/v1/classes/**").hasRole("TEACHER")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(authenticationHandlers)

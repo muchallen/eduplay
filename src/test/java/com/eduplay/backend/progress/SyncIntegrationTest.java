@@ -150,6 +150,61 @@ class SyncIntegrationTest extends IntegrationTest {
     }
 
     @Test
+    void sameLessonInTwoGradesIsTrackedSeparately() throws Exception {
+        Instant t = clock.instant().minus(Duration.ofHours(1));
+        Map<String, Object> gradeB = progress("number", "counting", "level1", 1, false, t);
+        gradeB.put("gradeId", "ecd_b");
+        sync(Map.of("lessonProgress", List.of(progress("number", "counting", "level1", 5, true, t), gradeB)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lessonProgress.length()").value(2))
+                .andExpect(jsonPath("$.lessonProgress[0].gradeId").value("ecd_a"))
+                .andExpect(jsonPath("$.lessonProgress[0].completed").value(true))
+                .andExpect(jsonPath("$.lessonProgress[1].gradeId").value("ecd_b"))
+                .andExpect(jsonPath("$.lessonProgress[1].currentGameIndex").value(1))
+                .andExpect(jsonPath("$.lessonProgress[1].completed").value(false));
+    }
+
+    @Test
+    void gameResultsKeepTheGradeTheyWerePlayedIn() throws Exception {
+        UUID id = UUID.randomUUID();
+        Map<String, Object> played = result(id, "counting", 70, clock.instant().minusSeconds(60));
+        played.put("gradeId", "ecd_b");
+        sync(Map.of("gameResults", List.of(played))).andExpect(status().isOk());
+        getAuthorized("/api/v1/children/" + childId + "/game-results", parent.accessToken())
+                .andExpect(jsonPath("$.items[0].gradeId").value("ecd_b"));
+    }
+
+    @Test
+    void gradeAndPercentScoreAreValidated() throws Exception {
+        Instant t = clock.instant().minus(Duration.ofMinutes(1));
+        Map<String, Object> noGrade = result(UUID.randomUUID(), "counting", 50, t);
+        noGrade.remove("gradeId");
+        sync(Map.of("gameResults", List.of(noGrade)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("gameResults[0].gradeId"));
+
+        Map<String, Object> unknownGrade = result(UUID.randomUUID(), "counting", 50, t);
+        unknownGrade.put("gradeId", "grade_7");
+        sync(Map.of("gameResults", List.of(unknownGrade)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_GRADE"));
+
+        sync(Map.of("gameResults", List.of(result(UUID.randomUUID(), "counting", 101, t))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("gameResults[0].score"));
+        assertThat(resultCount()).isZero();
+    }
+
+    @Test
+    void syncIsAcceptedAfterTheSubscriptionHasEnded() throws Exception {
+        jdbcTemplate.update("update subscriptions set status = 'EXPIRED', ends_at = now() - interval '1 day' "
+                + "where user_id = ?", parent.userId());
+        sync(Map.of("gameResults", List.of(result(UUID.randomUUID(), "counting", 80, clock.instant().minusSeconds(5)))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.acceptedGameResults").value(1));
+    }
+
+    @Test
     void batchesLargerThan500ResultsAreRejected() throws Exception {
         List<Map<String, Object>> results = new ArrayList<>();
         Instant t = clock.instant().minus(Duration.ofMinutes(1));
@@ -167,7 +222,7 @@ class SyncIntegrationTest extends IntegrationTest {
         List<Map<String, Object>> results = new ArrayList<>();
         Instant t = clock.instant().minus(Duration.ofMinutes(1));
         for (int i = 0; i < 500; i++) {
-            results.add(result(UUID.randomUUID(), "counting", i % 10, t.minusSeconds(i)));
+            results.add(result(UUID.randomUUID(), "counting", i % 101, t.minusSeconds(i)));
         }
         sync(Map.of("gameResults", results))
                 .andExpect(status().isOk())
@@ -237,6 +292,7 @@ class SyncIntegrationTest extends IntegrationTest {
     static Map<String, Object> progress(String section, String topic, String lesson, int index, boolean completed,
                                         Instant updatedAt) {
         Map<String, Object> item = new LinkedHashMap<>();
+        item.put("gradeId", "ecd_a");
         item.put("sectionId", section);
         item.put("topicId", topic);
         item.put("lessonId", lesson);
@@ -249,6 +305,7 @@ class SyncIntegrationTest extends IntegrationTest {
     static Map<String, Object> result(UUID id, String topic, int score, Instant playedAt) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("id", id.toString());
+        item.put("gradeId", "ecd_a");
         item.put("sectionId", "number");
         item.put("topicId", topic);
         item.put("lessonId", "level1");

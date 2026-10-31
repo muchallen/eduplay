@@ -44,8 +44,8 @@ class AccountIntegrationTest extends IntegrationTest {
         UUID childId = createChild(parent.accessToken(), "Kuda");
         postJson("/api/v1/children/" + childId + "/sync", Map.of("gameResults",
                 List.of(Map.ofEntries(
-                        Map.entry("id", UUID.randomUUID().toString()), Map.entry("sectionId", "number"),
-                        Map.entry("topicId", "counting"), Map.entry("lessonId", "level1"),
+                        Map.entry("id", UUID.randomUUID().toString()), Map.entry("gradeId", "ecd_a"),
+                        Map.entry("sectionId", "number"), Map.entry("topicId", "counting"), Map.entry("lessonId", "level1"),
                         Map.entry("gameIndex", 0), Map.entry("gameType", "MatchingGame"), Map.entry("score", 5),
                         Map.entry("attempts", 1), Map.entry("mistakes", 0), Map.entry("durationSeconds", 10),
                         Map.entry("completed", true), Map.entry("playedAt", clock.instant().minusSeconds(60).toString())))),
@@ -84,7 +84,7 @@ class AccountIntegrationTest extends IntegrationTest {
         Session parent = registerParent();
         UUID childId = createChild(parent.accessToken(), "Tino");
         postJson("/api/v1/children/" + childId + "/sync", Map.of("lessonProgress", List.of(Map.of(
-                "sectionId", "number", "topicId", "counting", "lessonId", "level1",
+                "gradeId", "ecd_a", "sectionId", "number", "topicId", "counting", "lessonId", "level1",
                 "currentGameIndex", 1, "completed", false))), parent.accessToken()).andExpect(status().isOk());
         mockMvc.perform(authorized(delete("/api/v1/me"), parent.accessToken())
                         .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("password", PASSWORD))))

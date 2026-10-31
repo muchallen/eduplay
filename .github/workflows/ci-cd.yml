@@ -6,6 +6,10 @@
 # Required repository secrets:   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 # Required repository variable:  EC2_HOST_KEY  (the host's "ssh-ed25519 AAAA..." public key,
 #                                 used to verify the server before deploying to it)
+# Optional repository variable:  API_DOMAIN    (e.g. api.eduplay.co.zw, with a DNS A record pointing at
+#                                 the instance). Without it the API is served at <ip>.sslip.io, a
+#                                 wildcard DNS name that resolves to the instance IP. Either way Caddy
+#                                 obtains a Let's Encrypt certificate and redirects HTTP to HTTPS.
 name: CI/CD
 
 on:
@@ -111,6 +115,7 @@ jobs:
       - name: Open SSH connection (EC2 Instance Connect)
         env:
           EC2_HOST_KEY: ${{ vars.EC2_HOST_KEY }}
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
         run: |
           if [ -z "$EC2_HOST_KEY" ]; then
             echo "::error::Repository variable EC2_HOST_KEY is not set"; exit 1
@@ -124,6 +129,7 @@ jobs:
             --instance-os-user "$EC2_USER" --ssh-public-key file://$HOME/.ssh/deploy.pub >/dev/null
           ssh $SSH_OPTS -o ControlMaster=yes -o ControlPersist=15m -o ConnectTimeout=20 -fN "$EC2_USER@$host"
           echo "EC2_HOST=$host" >> "$GITHUB_ENV"
+          echo "API_DOMAIN=${API_DOMAIN:-${host//./-}.sslip.io}" >> "$GITHUB_ENV"
 
       - name: Upload deployment files
         run: |
@@ -137,13 +143,15 @@ jobs:
           aws ecr get-login-password | ssh $SSH_OPTS "$EC2_USER@$EC2_HOST" \
             "sudo docker login --username AWS --password-stdin $REGISTRY"
           ssh $SSH_OPTS "$EC2_USER@$EC2_HOST" \
-            "sudo /opt/eduplay/deploy.sh $REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+            "sudo /opt/eduplay/deploy.sh $REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA $API_DOMAIN"
 
+      # The first deployment to a new domain waits for its certificate to be issued.
       - name: Smoke test
         run: |
-          curl -fsS --retry 12 --retry-delay 5 --retry-all-errors "http://$EC2_HOST/livez"
+          curl -fsS --retry 24 --retry-delay 5 --retry-all-errors "https://$API_DOMAIN/livez"
           echo
-          echo "### Deployed \`${GITHUB_SHA::12}\` to http://$EC2_HOST" >> "$GITHUB_STEP_SUMMARY"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://$API_DOMAIN/livez")" = 308
+          echo "### Deployed \`${GITHUB_SHA::12}\` to https://$API_DOMAIN" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Close SSH connection
         if: always()

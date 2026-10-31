@@ -11,6 +11,8 @@ public interface GameResultRepository extends JpaRepository<GameResult, UUID> {
 
     Page<GameResult> findByChildId(UUID childId, Pageable pageable);
 
+    Page<GameResult> findByChildIdAndGradeId(UUID childId, String gradeId, Pageable pageable);
+
     List<GameResult> findByChildIdOrderByPlayedAtAsc(UUID childId);
 
     long countByChildId(UUID childId);

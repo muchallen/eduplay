@@ -46,7 +46,7 @@ class DatabaseMigrationIntegrationTest extends IntegrationTest {
     void lessonProgressIsUniquePerChildAndLesson() throws Exception {
         Session parent = registerParent();
         UUID childId = createChild(parent.accessToken(), "Unique");
-        String insert = "insert into lesson_progress (child_id, section_id, topic_id, lesson_id) values (?, 'a', 'b', 'c')";
+        String insert = "insert into lesson_progress (child_id, grade_id, section_id, topic_id, lesson_id) values (?, 'ecd_a', 'a', 'b', 'c')";
         jdbcTemplate.update(insert, childId);
         assertThatThrownBy(() -> jdbcTemplate.update(insert, childId))
                 .isInstanceOf(DataIntegrityViolationException.class);

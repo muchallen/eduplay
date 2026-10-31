@@ -4,6 +4,8 @@ import com.eduplay.backend.auth.service.RefreshTokenService;
 import com.eduplay.backend.child.domain.Child;
 import com.eduplay.backend.child.dto.ChildResponse;
 import com.eduplay.backend.child.repository.ChildRepository;
+import com.eduplay.backend.classroom.dto.ClassroomResponse;
+import com.eduplay.backend.classroom.repository.ClassroomRepository;
 import com.eduplay.backend.common.exception.ApiException;
 import com.eduplay.backend.config.EduplayProperties;
 import com.eduplay.backend.progress.dto.GameResultResponse;
@@ -38,6 +40,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final ConsentRecordRepository consentRecordRepository;
     private final ChildRepository childRepository;
+    private final ClassroomRepository classroomRepository;
     private final LessonProgressRepository lessonProgressRepository;
     private final GameResultRepository gameResultRepository;
     private final SubscriptionService subscriptionService;
@@ -65,7 +68,8 @@ public class UserService {
     }
 
     /**
-     * Soft-deletes the account and all child profiles and signs out every device. The data stays
+     * Soft-deletes the account and all child profiles it owns, deletes its classes (teachers) and
+     * signs out every device. The data stays
      * recoverable by an operator for the retention period and is then hard-deleted by
      * {@link com.eduplay.backend.infrastructure.DataRetentionJob}.
      */
@@ -79,6 +83,7 @@ public class UserService {
         user.setDeletedAt(now);
         user.setUpdatedAt(now);
         childRepository.softDeleteAllForParent(userId, now);
+        classroomRepository.deleteAllForTeacher(userId);
         refreshTokenService.revokeAll(userId);
         log.info("Account {} scheduled for deletion", userId);
         return new AccountDeletionResponse(
@@ -98,7 +103,7 @@ public class UserService {
                 new ConsentRecord(userId, policyVersion, clock.instant(), clientIp)));
     }
 
-    /** Machine-readable copy of everything stored about the parent and their children. */
+    /** Machine-readable copy of everything stored about the account, its children and its classes. */
     @Transactional(readOnly = true)
     public DataExportResponse export(UUID userId) {
         User user = requireActive(userId);
@@ -107,16 +112,21 @@ public class UserService {
                 .toList();
         List<DataExportResponse.ChildExport> children =
                 childRepository.findByParentIdAndDeletedAtIsNullOrderByCreatedAtAsc(userId).stream()
-                        .map(this::exportChild)
+                        .map(child -> exportChild(child, userId))
                         .toList();
+        List<ClassroomResponse> classes = classroomRepository.findByTeacherIdOrderByCreatedAtAscIdAsc(userId).stream()
+                .map(classroom -> ClassroomResponse.from(classroom,
+                        classroomRepository.countActiveChildren(classroom.getId())))
+                .toList();
         return new DataExportResponse(clock.instant(), UserResponse.from(user), consents,
-                subscriptionService.findCurrent(userId), children);
+                subscriptionService.findCurrent(userId), children, classes);
     }
 
-    private DataExportResponse.ChildExport exportChild(Child child) {
+    private DataExportResponse.ChildExport exportChild(Child child, UUID ownerId) {
         return new DataExportResponse.ChildExport(
-                ChildResponse.from(child),
-                lessonProgressRepository.findByChildIdOrderBySectionIdAscTopicIdAscLessonIdAsc(child.getId()).stream()
+                ChildResponse.from(child, ownerId),
+                lessonProgressRepository.findByChildIdOrderByGradeIdAscSectionIdAscTopicIdAscLessonIdAsc(child.getId())
+                        .stream()
                         .map(LessonProgressResponse::from)
                         .toList(),
                 gameResultRepository.findByChildIdOrderByPlayedAtAsc(child.getId()).stream()

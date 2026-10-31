@@ -56,9 +56,9 @@ class RateLimitServiceTest {
     }
 
     private RateLimitService service(boolean enabled) {
-        EduplayProperties.RateLimit rateLimit = new EduplayProperties.RateLimit(enabled, rule, rule, rule, rule, rule, rule);
+        EduplayProperties.RateLimit rateLimit = new EduplayProperties.RateLimit(enabled, rule, rule, rule, rule, rule, rule, rule);
         EduplayProperties properties = new EduplayProperties(null, null, null, null, null, null, null, null, null,
-                null, null, rateLimit);
+                null, null, null, rateLimit);
         return new RateLimitService(properties, clock);
     }
 }

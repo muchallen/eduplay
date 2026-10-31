@@ -36,7 +36,8 @@ public class ChildController {
 
     private final ChildService childService;
 
-    @Operation(operationId = "listChildren", summary = "List the signed-in parent's child profiles")
+    @Operation(operationId = "listChildren", summary = "List child profiles",
+            description = "Children the caller owns and, for teachers, children linked to their classes.")
     @GetMapping
     public PageResponse<ChildResponse> list(@AuthenticationPrincipal AuthenticatedUser user,
                                             @RequestParam(defaultValue = "0") @Min(0) int page,
@@ -54,11 +55,12 @@ public class ChildController {
     @PostMapping
     public ResponseEntity<ChildResponse> create(@AuthenticationPrincipal AuthenticatedUser user,
                                                 @Valid @RequestBody CreateChildRequest request) {
-        ChildResponse child = childService.create(user.id(), request);
+        ChildResponse child = childService.create(user, request);
         return ResponseEntity.created(URI.create("/api/v1/children/" + child.id())).body(child);
     }
 
-    @Operation(operationId = "updateChild", summary = "Update a child profile (partial)")
+    @Operation(operationId = "updateChild", summary = "Update a child profile (partial)",
+            description = "Owner only; a linked teacher receives 403 CHILD_NOT_OWNED.")
     @PatchMapping("/{childId}")
     public ChildResponse update(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID childId,
                                 @Valid @RequestBody UpdateChildRequest request) {
@@ -66,7 +68,7 @@ public class ChildController {
     }
 
     @Operation(operationId = "deleteChild", summary = "Delete a child profile",
-            description = "The profile disappears immediately; its data is permanently erased after 30 days.")
+            description = "Owner only. The profile disappears immediately; its data is permanently erased after 30 days.")
     @DeleteMapping("/{childId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID childId) {

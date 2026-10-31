@@ -36,7 +36,8 @@ class RefreshTokenIntegrationTest extends IntegrationTest {
         JsonNode rotated = read(postJson("/api/v1/auth/refresh", Map.of("refreshToken", phone.refreshToken()))
                 .andExpect(status().isOk()));
 
-        // An attacker (or a replay) presents the old token again.
+        // An attacker (or a replay) presents the old token again after the retry grace period.
+        clock.advance(Duration.ofSeconds(61));
         postJson("/api/v1/auth/refresh", Map.of("refreshToken", phone.refreshToken()))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("REFRESH_TOKEN_REUSED"));
@@ -46,6 +47,51 @@ class RefreshTokenIntegrationTest extends IntegrationTest {
         postJson("/api/v1/auth/refresh", Map.of("refreshToken", tablet.refreshToken()))
                 .andExpect(status().isUnauthorized());
         assertThat(activeCount(phone)).isZero();
+    }
+
+    @Test
+    void retryWithinGracePeriodReturnsTheSameReplacement() throws Exception {
+        Session phone = registerParent();
+        Session tablet = login(phone.email(), PASSWORD);
+
+        JsonNode first = read(postJson("/api/v1/auth/refresh", Map.of("refreshToken", phone.refreshToken()))
+                .andExpect(status().isOk()));
+        // The response was lost on a weak connection; the app retries with the old token.
+        clock.advance(Duration.ofSeconds(30));
+        JsonNode retry = read(postJson("/api/v1/auth/refresh", Map.of("refreshToken", phone.refreshToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty()));
+
+        String replacement = first.get("refreshToken").asText();
+        assertThat(retry.get("refreshToken").asText()).isEqualTo(replacement);
+        assertThat(retry.get("refreshTokenExpiresAt").asText()).isEqualTo(first.get("refreshTokenExpiresAt").asText());
+        assertThat(activeCount(phone)).isEqualTo(2);
+
+        postJson("/api/v1/auth/refresh", Map.of("refreshToken", replacement)).andExpect(status().isOk());
+        postJson("/api/v1/auth/refresh", Map.of("refreshToken", tablet.refreshToken())).andExpect(status().isOk());
+    }
+
+    @Test
+    void retryAfterTheReplacementWasUsedIsTreatedAsReuse() throws Exception {
+        Session phone = registerParent();
+        JsonNode first = read(postJson("/api/v1/auth/refresh", Map.of("refreshToken", phone.refreshToken()))
+                .andExpect(status().isOk()));
+        postJson("/api/v1/auth/refresh", Map.of("refreshToken", first.get("refreshToken").asText()))
+                .andExpect(status().isOk());
+
+        postJson("/api/v1/auth/refresh", Map.of("refreshToken", phone.refreshToken()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("REFRESH_TOKEN_REUSED"));
+        assertThat(activeCount(phone)).isZero();
+    }
+
+    @Test
+    void loggedOutTokenGetsNoGracePeriod() throws Exception {
+        Session phone = registerParent();
+        postJson("/api/v1/auth/logout", Map.of("refreshToken", phone.refreshToken())).andExpect(status().isNoContent());
+        postJson("/api/v1/auth/refresh", Map.of("refreshToken", phone.refreshToken()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("REFRESH_TOKEN_REUSED"));
     }
 
     @Test

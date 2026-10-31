@@ -3,6 +3,7 @@ package com.eduplay.backend.report.dto;
 import java.time.Instant;
 
 public record TopicPerformance(
+        String gradeId,
         String sectionId,
         String topicId,
         long gamesPlayed,

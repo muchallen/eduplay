@@ -6,6 +6,7 @@ import java.util.UUID;
 
 public record GameResultResponse(
         UUID id,
+        String gradeId,
         String sectionId,
         String topicId,
         String lessonId,
@@ -20,7 +21,7 @@ public record GameResultResponse(
         Instant receivedAt) {
 
     public static GameResultResponse from(GameResult result) {
-        return new GameResultResponse(result.getId(), result.getSectionId(), result.getTopicId(),
+        return new GameResultResponse(result.getId(), result.getGradeId(), result.getSectionId(), result.getTopicId(),
                 result.getLessonId(), result.getGameIndex(), result.getGameType(), result.getScore(),
                 result.getAttempts(), result.getMistakes(), result.getDurationSeconds(), result.isCompleted(),
                 result.getPlayedAt(), result.getReceivedAt());

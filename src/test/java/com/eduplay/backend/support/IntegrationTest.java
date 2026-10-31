@@ -115,7 +115,7 @@ public abstract class IntegrationTest {
     }
 
     protected UUID createChild(String accessToken, String name) throws Exception {
-        JsonNode body = read(postJson("/api/v1/children", Map.of("displayName", name), accessToken)
+        JsonNode body = read(postJson("/api/v1/children", Map.of("displayName", name, "gradeId", "ecd_a"), accessToken)
                 .andExpect(status().isCreated()));
         return UUID.fromString(body.get("id").asText());
     }

@@ -3,6 +3,7 @@ package com.eduplay.backend.report.service;
 import com.eduplay.backend.child.domain.Child;
 import com.eduplay.backend.child.service.ChildAccessService;
 import com.eduplay.backend.config.EduplayProperties;
+import com.eduplay.backend.grade.GradeCatalog;
 import com.eduplay.backend.report.dto.ChildReportResponse;
 import com.eduplay.backend.report.dto.ChildReportResponse.TopicSummary;
 import com.eduplay.backend.report.dto.TopicPerformance;
@@ -28,25 +29,28 @@ import org.springframework.transaction.annotation.Transactional;
 public class ReportService {
 
     private final ChildAccessService childAccessService;
+    private final GradeCatalog gradeCatalog;
     private final ReportRepository reportRepository;
     private final EduplayProperties properties;
     private final Clock clock;
 
     /**
-     * Builds the dashboard for a child owned by the authenticated parent.
+     * Builds the dashboard for a child the caller owns or teaches.
      *
-     * @param days optional reporting window; null means all time
+     * @param gradeId optional grade filter; null means all grades
+     * @param days    optional reporting window; null means all time
      */
     @Transactional(readOnly = true)
-    public ChildReportResponse report(UUID parentId, UUID childId, Integer days) {
-        Child child = childAccessService.requireOwnedChild(parentId, childId);
+    public ChildReportResponse report(UUID userId, UUID childId, String gradeId, Integer days) {
+        Child child = childAccessService.requireAccessibleChild(userId, childId);
+        gradeCatalog.requireIfPresent(gradeId);
         Instant now = clock.instant();
         Instant since = days == null ? null : now.minus(Duration.ofDays(days));
         EduplayProperties.Report config = properties.report();
 
-        GameTotals totals = reportRepository.gameTotals(childId, since);
-        long lessonsCompleted = reportRepository.lessonsCompleted(childId, since);
-        List<TopicPerformance> topics = topics(childId, since, config);
+        GameTotals totals = reportRepository.gameTotals(childId, gradeId, since);
+        long lessonsCompleted = reportRepository.lessonsCompleted(childId, gradeId, since);
+        List<TopicPerformance> topics = topics(childId, gradeId, since, config);
 
         List<TopicSummary> strong = topics.stream()
                 .filter(t -> t.rating() == Rating.STRONG)
@@ -60,16 +64,17 @@ public class ReportService {
                 .toList();
 
         ChildReportResponse.RecentActivity recentActivity = new ChildReportResponse.RecentActivity(
-                reportRepository.gameTotals(childId, null).lastPlayedAt(),
-                reportRepository.activeDays(childId, now.minus(Duration.ofDays(7))),
-                reportRepository.activeDays(childId, now.minus(Duration.ofDays(30))),
-                reportRepository.recentGames(childId, config.recentActivityLimit()));
+                reportRepository.gameTotals(childId, gradeId, null).lastPlayedAt(),
+                reportRepository.activeDays(childId, gradeId, now.minus(Duration.ofDays(7))),
+                reportRepository.activeDays(childId, gradeId, now.minus(Duration.ofDays(30))),
+                reportRepository.recentGames(childId, gradeId, config.recentActivityLimit()));
 
         return new ChildReportResponse(
                 child.getId(),
                 child.getDisplayName(),
                 now,
                 since,
+                gradeId,
                 new ChildReportResponse.Totals(lessonsCompleted, totals.gamesPlayed(), totals.gamesCompleted(),
                         totals.totalSeconds(), round(totals.averageScore())),
                 topics,
@@ -78,16 +83,17 @@ public class ReportService {
                 recentActivity);
     }
 
-    private List<TopicPerformance> topics(UUID childId, Instant since, EduplayProperties.Report config) {
+    private List<TopicPerformance> topics(UUID childId, String gradeId, Instant since,
+                                          EduplayProperties.Report config) {
         Map<String, TopicLessonStats> lessonStats = new TreeMap<>();
-        for (TopicLessonStats stats : reportRepository.topicLessonStats(childId)) {
-            lessonStats.put(key(stats.sectionId(), stats.topicId()), stats);
+        for (TopicLessonStats stats : reportRepository.topicLessonStats(childId, gradeId)) {
+            lessonStats.put(key(stats.gradeId(), stats.sectionId(), stats.topicId()), stats);
         }
         Map<String, TopicPerformance> topics = new TreeMap<>();
-        for (TopicGameStats game : reportRepository.topicGameStats(childId, since)) {
-            String key = key(game.sectionId(), game.topicId());
+        for (TopicGameStats game : reportRepository.topicGameStats(childId, gradeId, since)) {
+            String key = key(game.gradeId(), game.sectionId(), game.topicId());
             TopicLessonStats lessons = lessonStats.remove(key);
-            topics.put(key, new TopicPerformance(game.sectionId(), game.topicId(), game.gamesPlayed(),
+            topics.put(key, new TopicPerformance(game.gradeId(), game.sectionId(), game.topicId(), game.gamesPlayed(),
                     round(game.averageScore()), round(game.averageMistakes()), game.totalSeconds(),
                     lessons == null ? 0 : lessons.lessonsCompleted(),
                     lessons == null ? 0 : lessons.lessonsStarted(),
@@ -96,7 +102,8 @@ public class ReportService {
         }
         // Topics with lesson progress but no games in the window.
         for (TopicLessonStats lessons : lessonStats.values()) {
-            topics.put(key(lessons.sectionId(), lessons.topicId()), new TopicPerformance(lessons.sectionId(),
+            topics.put(key(lessons.gradeId(), lessons.sectionId(), lessons.topicId()),
+                    new TopicPerformance(lessons.gradeId(), lessons.sectionId(),
                     lessons.topicId(), 0, null, null, 0, lessons.lessonsCompleted(), lessons.lessonsStarted(),
                     null, Rating.NOT_ENOUGH_DATA));
         }
@@ -117,11 +124,11 @@ public class ReportService {
     }
 
     private static TopicSummary summary(TopicPerformance topic) {
-        return new TopicSummary(topic.sectionId(), topic.topicId(), topic.averageScore(), topic.gamesPlayed());
+        return new TopicSummary(topic.gradeId(), topic.sectionId(), topic.topicId(), topic.averageScore(), topic.gamesPlayed());
     }
 
-    private static String key(String sectionId, String topicId) {
-        return sectionId + '/' + topicId;
+    private static String key(String gradeId, String sectionId, String topicId) {
+        return gradeId + '/' + sectionId + '/' + topicId;
     }
 
     private static Double round(Double value) {

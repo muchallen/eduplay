@@ -41,8 +41,9 @@ public class AuthController {
     private final PasswordResetService passwordResetService;
     private final EmailVerificationService emailVerificationService;
 
-    @Operation(summary = "Register a parent account", description = "Records parental consent, starts a trial "
-            + "subscription, sends a verification email and returns tokens for this device.")
+    @Operation(summary = "Register a parent or teacher account", description = "Records consent, starts a trial "
+            + "subscription, sends a verification email and returns tokens for this device. Set accountType to "
+            + "TEACHER for a teacher account. Email verification is not required to use the API.")
     @SecurityRequirements
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
@@ -58,8 +59,10 @@ public class AuthController {
     }
 
     @Operation(summary = "Rotate a refresh token", description = "Returns a new access token and a new refresh "
-            + "token; the presented refresh token is revoked. Re-using a revoked refresh token signs the account "
-            + "out of every device. Persist the new refresh token before using it.")
+            + "token; the presented refresh token is revoked. Retrying with the same refresh token within the "
+            + "grace period (60 seconds by default), for example after a lost response, returns the same "
+            + "replacement refresh token. Presenting a revoked refresh token after that signs the account out of "
+            + "every device (REFRESH_TOKEN_REUSED). Persist the new refresh token before using it.")
     @SecurityRequirements
     @PostMapping("/refresh")
     public AuthResponse refresh(@Valid @RequestBody RefreshRequest request) {

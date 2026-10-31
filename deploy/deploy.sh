@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Deploys one release on the EC2 host. Run as root from /opt/eduplay by the CI/CD
-# pipeline (or by hand): sudo /opt/eduplay/deploy.sh <registry>/<repo>:<tag>
+# pipeline (or by hand): sudo /opt/eduplay/deploy.sh <registry>/<repo>:<tag> [site-address]
+#
+# site-address is the public host name, e.g. api.example.com. Caddy then obtains a Let's Encrypt
+# certificate, serves HTTPS on 443 and redirects HTTP to HTTPS. Omitted, the current value in .env
+# is kept (":80", plain HTTP, on a fresh host).
 #
 # Idempotent. On the first run it creates /opt/eduplay/.env with freshly generated
 # secrets; those secrets never leave the host and later runs never overwrite them.
 set -euo pipefail
 
-APP_IMAGE="${1:?usage: deploy.sh <image>}"
+APP_IMAGE="${1:?usage: deploy.sh <image> [site-address]}"
+SITE_ADDRESS="${2:-}"
 DIR=/opt/eduplay
 COMPOSE=(docker compose -f "$DIR/docker-compose.prod.yml" --project-directory "$DIR")
 cd "$DIR"
@@ -52,11 +57,18 @@ EOF
   )
 fi
 
-# Point the stack at the release being deployed (kept in .env for manual restarts).
-if grep -q '^APP_IMAGE=' .env; then
-  sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${APP_IMAGE}|" .env
-else
-  printf '\nAPP_IMAGE=%s\n' "$APP_IMAGE" >> .env
+# Sets KEY=VALUE in .env, replacing an existing line (kept there for manual restarts).
+set_env() {
+  if grep -q "^$1=" .env; then
+    sed -i "s|^$1=.*|$1=$2|" .env
+  else
+    printf '%s=%s\n' "$1" "$2" >> .env
+  fi
+}
+
+set_env APP_IMAGE "$APP_IMAGE"
+if [ -n "$SITE_ADDRESS" ]; then
+  set_env SITE_ADDRESS "$SITE_ADDRESS"
 fi
 
 "${COMPOSE[@]}" pull --quiet

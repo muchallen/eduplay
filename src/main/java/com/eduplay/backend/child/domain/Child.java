@@ -13,7 +13,11 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** A child profile owned by a parent. Children never have credentials of their own. */
+/**
+ * A child profile. Children never have credentials of their own. The owner ({@code parentId}) is
+ * the account that created the profile: normally a parent, or a teacher for a pupil without a
+ * parent account. Teachers can also reach a child through a class it is linked to.
+ */
 @Entity
 @Table(name = "children")
 @Getter
@@ -37,6 +41,9 @@ public class Child {
     @Column(name = "avatar_id", length = 64)
     private String avatarId;
 
+    @Column(name = "grade_id", nullable = false, length = 32)
+    private String gradeId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -46,11 +53,13 @@ public class Child {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
-    public Child(UUID parentId, String displayName, Integer birthYear, String avatarId, Instant now) {
+    public Child(UUID parentId, String displayName, Integer birthYear, String avatarId, String gradeId,
+                 Instant now) {
         this.parentId = parentId;
         this.displayName = displayName;
         this.birthYear = birthYear;
         this.avatarId = avatarId;
+        this.gradeId = gradeId;
         this.createdAt = now;
         this.updatedAt = now;
     }

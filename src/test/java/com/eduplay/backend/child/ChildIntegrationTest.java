@@ -20,13 +20,15 @@ class ChildIntegrationTest extends IntegrationTest {
         Session parent = registerParent();
         int birthYear = Year.now().getValue() - 6;
 
-        postJson("/api/v1/children", Map.of("displayName", "Tendai", "birthYear", birthYear, "avatarId", "lion_01"),
-                parent.accessToken())
+        postJson("/api/v1/children", Map.of("displayName", "Tendai", "birthYear", birthYear, "avatarId", "lion_01",
+                        "gradeId", "ecd_b"), parent.accessToken())
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("Location"))
                 .andExpect(jsonPath("$.displayName").value("Tendai"))
                 .andExpect(jsonPath("$.birthYear").value(birthYear))
-                .andExpect(jsonPath("$.avatarId").value("lion_01"));
+                .andExpect(jsonPath("$.avatarId").value("lion_01"))
+                .andExpect(jsonPath("$.gradeId").value("ecd_b"))
+                .andExpect(jsonPath("$.access").value("OWNER"));
         clock.advance(java.time.Duration.ofSeconds(1));
         UUID second = createChild(parent.accessToken(), "Rudo");
 
@@ -38,8 +40,9 @@ class ChildIntegrationTest extends IntegrationTest {
 
         mockMvc.perform(authorized(patch("/api/v1/children/" + second), parent.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("displayName", "Rudo M", "avatarId", "zebra_02"))))
+                        .content(json(Map.of("displayName", "Rudo M", "avatarId", "zebra_02", "gradeId", "ecd_b"))))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gradeId").value("ecd_b"))
                 .andExpect(jsonPath("$.displayName").value("Rudo M"))
                 .andExpect(jsonPath("$.avatarId").value("zebra_02"));
 
@@ -96,11 +99,18 @@ class ChildIntegrationTest extends IntegrationTest {
         Session parent = registerParent();
         postJson("/api/v1/children", Map.of("displayName", ""), parent.accessToken())
                 .andExpect(status().isBadRequest());
-        postJson("/api/v1/children", Map.of("displayName", "Too Old", "birthYear", 1980), parent.accessToken())
+        postJson("/api/v1/children", Map.of("displayName", "Too Old", "birthYear", 1980, "gradeId", "ecd_a"), parent.accessToken())
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_BIRTH_YEAR"));
-        postJson("/api/v1/children", Map.of("displayName", "Bad Avatar", "avatarId", "../etc"), parent.accessToken())
+        postJson("/api/v1/children", Map.of("displayName", "Bad Avatar", "avatarId", "../etc", "gradeId", "ecd_a"),
+                        parent.accessToken())
                 .andExpect(status().isBadRequest());
+        postJson("/api/v1/children", Map.of("displayName", "No Grade"), parent.accessToken())
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("gradeId"));
+        postJson("/api/v1/children", Map.of("displayName", "Grade 7", "gradeId", "grade_7"), parent.accessToken())
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_GRADE"));
     }
 
     @Test
@@ -109,7 +119,7 @@ class ChildIntegrationTest extends IntegrationTest {
         for (int i = 0; i < 10; i++) {
             createChild(parent.accessToken(), "Child " + i);
         }
-        postJson("/api/v1/children", Map.of("displayName", "One too many"), parent.accessToken())
+        postJson("/api/v1/children", Map.of("displayName", "One too many", "gradeId", "ecd_a"), parent.accessToken())
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CHILD_LIMIT_REACHED"));
     }

@@ -7,5 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface LessonProgressRepository extends JpaRepository<LessonProgress, UUID> {
 
-    List<LessonProgress> findByChildIdOrderBySectionIdAscTopicIdAscLessonIdAsc(UUID childId);
+    List<LessonProgress> findByChildIdOrderByGradeIdAscSectionIdAscTopicIdAscLessonIdAsc(UUID childId);
 }

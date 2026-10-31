@@ -7,13 +7,73 @@ info:
     Access tokens expire after 15 minutes; a 401 with code TOKEN_EXPIRED means the
     client should call /api/v1/auth/refresh and retry the request.
     Every error response uses the ApiError schema; switch on its `code` field.
-  version: 1.0.0
+    Scores are percent correct (0-100). Children, lesson progress and game results carry
+    a gradeId (ecd_a, ecd_b).
+  version: 1.1.0
 servers:
 - url: /
   description: Current host
 security:
 - bearerAuth: []
 paths:
+  /api/v1/classes/{classId}/children/{childId}:
+    put:
+      tags:
+      - Classes
+      summary: Add a child the teacher created to the class
+      description: "Idempotent. Parents' children join with the class join code instead\
+        \ (POST /api/v1/children/{childId}/classes)."
+      operationId: addClassChild
+      parameters:
+      - name: classId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: childId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "204":
+          description: No Content
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      tags:
+      - Classes
+      summary: Remove a child from the class
+      description: Idempotent.
+      operationId: removeClassChild
+      parameters:
+      - name: classId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: childId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "204":
+          description: No Content
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/v1/admin/users/{userId}/subscription:
     put:
       tags:
@@ -43,8 +103,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SubscriptionResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -69,8 +128,80 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConsentResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/classes:
+    get:
+      tags:
+      - Classes
+      summary: List the signed-in teacher's classes
+      operationId: listClasses
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClassroomResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      tags:
+      - Classes
+      summary: Create a class
+      description: The response includes the join code parents use to link their children.
+      operationId: createClass
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateClassroomRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassroomResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/classes/{classId}/join-code:
+    post:
+      tags:
+      - Classes
+      summary: Replace the class join code
+      description: The old code stops working; children already linked stay linked.
+      operationId: rotateClassJoinCode
+      parameters:
+      - name: classId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassroomResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -79,7 +210,9 @@ paths:
     get:
       tags:
       - Children
-      summary: List the signed-in parent's child profiles
+      summary: List child profiles
+      description: "Children the caller owns and, for teachers, children linked to\
+        \ their classes."
       operationId: listChildren
       parameters:
       - name: page
@@ -107,8 +240,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PageResponseChildResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -132,8 +264,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChildResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -144,9 +275,10 @@ paths:
       - Learning progress
       summary: Upload progress recorded offline
       description: |-
-        Idempotent and safe to retry. Up to 500 game results and 500 lesson entries per request; send larger
+        Idempotent and safe to retry. Allowed for the child's owner and for teachers of a linked class, and
+        never blocked by an ended trial or subscription. Up to 500 game results and 500 lesson entries per request; send larger
         queues in several requests. Game results whose id is already stored are ignored. Lesson progress is
-        merged: completed beats incomplete, otherwise the higher currentGameIndex wins. The response holds the
+        merged per (gradeId, sectionId, topicId, lessonId): completed beats incomplete, otherwise the higher currentGameIndex wins. The response holds the
         full merged progress, which the client should store locally. Bodies may be sent with
         Content-Encoding: gzip.
       operationId: syncProgress
@@ -171,8 +303,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/SyncResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/children/{childId}/classes:
+    get:
+      tags:
+      - Classes
+      summary: Classes a child is linked to (owner only)
+      operationId: listChildClasses
+      parameters:
+      - name: childId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LinkedClassResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      tags:
+      - Classes
+      summary: Link a child to a class with its join code (owner only)
+      description: "Gives the class teacher read, report and sync access to the child.\
+        \ Idempotent. Limited to 10 attempts per hour per account."
+      operationId: joinClass
+      parameters:
+      - name: childId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinClassRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkedClassResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -197,8 +389,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -218,8 +409,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -228,9 +418,10 @@ paths:
     post:
       tags:
       - Authentication
-      summary: Register a parent account
-      description: "Records parental consent, starts a trial subscription, sends a\
-        \ verification email and returns tokens for this device."
+      summary: Register a parent or teacher account
+      description: "Records consent, starts a trial subscription, sends a verification\
+        \ email and returns tokens for this device. Set accountType to TEACHER for\
+        \ a teacher account. Email verification is not required to use the API."
       operationId: register
       requestBody:
         content:
@@ -246,8 +437,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -258,9 +448,12 @@ paths:
       tags:
       - Authentication
       summary: Rotate a refresh token
-      description: Returns a new access token and a new refresh token; the presented
-        refresh token is revoked. Re-using a revoked refresh token signs the account
-        out of every device. Persist the new refresh token before using it.
+      description: "Returns a new access token and a new refresh token; the presented\
+        \ refresh token is revoked. Retrying with the same refresh token within the\
+        \ grace period (60 seconds by default), for example after a lost response,\
+        \ returns the same replacement refresh token. Presenting a revoked refresh\
+        \ token after that signs the account out of every device (REFRESH_TOKEN_REUSED).\
+        \ Persist the new refresh token before using it."
       operationId: refresh
       requestBody:
         content:
@@ -276,8 +469,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -305,8 +497,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -333,8 +524,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -356,8 +546,7 @@ paths:
         "204":
           description: No Content
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -373,8 +562,7 @@ paths:
         "204":
           description: No Content
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -399,8 +587,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -420,8 +607,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -448,8 +634,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/AccountDeletionResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -473,8 +658,87 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/classes/{classId}:
+    get:
+      tags:
+      - Classes
+      summary: Get one class
+      operationId: getClass
+      parameters:
+      - name: classId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassroomResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      tags:
+      - Classes
+      summary: Delete a class
+      description: Removes the class and its links. The children and their data are
+        not affected.
+      operationId: deleteClass
+      parameters:
+      - name: classId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "204":
+          description: No Content
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      tags:
+      - Classes
+      summary: Update a class (partial)
+      operationId: updateClass
+      parameters:
+      - name: classId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateClassroomRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassroomResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -500,8 +764,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChildResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -510,8 +773,8 @@ paths:
       tags:
       - Children
       summary: Delete a child profile
-      description: The profile disappears immediately; its data is permanently erased
-        after 30 days.
+      description: Owner only. The profile disappears immediately; its data is permanently
+        erased after 30 days.
       operationId: deleteChild
       parameters:
       - name: childId
@@ -524,8 +787,7 @@ paths:
         "204":
           description: No Content
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -534,6 +796,7 @@ paths:
       tags:
       - Children
       summary: Update a child profile (partial)
+      description: Owner only; a linked teacher receives 403 CHILD_NOT_OWNED.
       operationId: updateChild
       parameters:
       - name: childId
@@ -556,8 +819,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChildResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -576,8 +838,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SubscriptionResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -596,86 +857,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/DataExportResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/v1/children/{childId}/report:
+  /api/v1/classes/{classId}/children:
     get:
       tags:
-      - Reports
-      summary: Parent dashboard report for a child
-      description: |-
-        Totals, per-topic performance, strong topics, topics needing improvement and recent activity.
-        Topic ratings use configurable average-score thresholds and need a minimum number of games.
-      operationId: getChildReport
+      - Classes
+      summary: Children linked to a class
+      operationId: listClassChildren
       parameters:
-      - name: childId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - name: days
-        in: query
-        description: Only include the last N days (omit for all time)
-        required: false
-        schema:
-          type: integer
-          format: int32
-          maximum: 3650
-          minimum: 1
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ChildReportResponse"
-        default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-  /api/v1/children/{childId}/progress:
-    get:
-      tags:
-      - Learning progress
-      summary: Server-side lesson progress for a child
-      operationId: getProgress
-      parameters:
-      - name: childId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProgressResponse"
-        default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-  /api/v1/children/{childId}/game-results:
-    get:
-      tags:
-      - Learning progress
-      summary: "Game results for a child, newest first"
-      operationId: listGameResults
-      parameters:
-      - name: childId
+      - name: classId
         in: path
         required: true
         schema:
@@ -704,10 +898,159 @@ paths:
           content:
             application/json:
               schema:
+                $ref: "#/components/schemas/PageResponseChildResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/children/{childId}/report:
+    get:
+      tags:
+      - Reports
+      summary: Dashboard report for a child
+      description: |-
+        Totals, per-topic performance, strong topics, topics needing improvement and recent activity, for the
+        child's owner or a teacher of a linked class. Topics are reported per grade. Scores are percent correct
+        (0-100); a topic is STRONG at an average of 80 or more and NEEDS_IMPROVEMENT below 50 (configurable), and
+        needs a minimum number of games to be rated.
+      operationId: getChildReport
+      parameters:
+      - name: childId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: gradeId
+        in: query
+        description: Only include this grade (omit for all grades)
+        required: false
+        schema:
+          type: string
+      - name: days
+        in: query
+        description: Only include the last N days (omit for all time)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          maximum: 3650
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChildReportResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/children/{childId}/progress:
+    get:
+      tags:
+      - Learning progress
+      summary: Server-side lesson progress for a child
+      operationId: getProgress
+      parameters:
+      - name: childId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressResponse"
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/children/{childId}/game-results:
+    get:
+      tags:
+      - Learning progress
+      summary: "Game results for a child, newest first"
+      operationId: listGameResults
+      parameters:
+      - name: childId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: gradeId
+        in: query
+        description: Only results played in this grade
+        required: false
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+          minimum: 0
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+          maximum: 200
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
                 $ref: "#/components/schemas/PageResponseGameResultResponse"
         default:
-          description: "Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED,\
-            \ CHILD_NOT_FOUND, RATE_LIMITED)."
+          description: Error. Switch on `code`; the ApiError schema lists every value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/children/{childId}/classes/{classId}:
+    delete:
+      tags:
+      - Classes
+      summary: Remove a child from a class (owner only)
+      description: Idempotent. The teacher loses access to the child.
+      operationId: leaveClass
+      parameters:
+      - name: childId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: classId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "204":
+          description: No Content
+        default:
+          description: Error. Switch on `code`; the ApiError schema lists every value.
           content:
             application/json:
               schema:
@@ -789,6 +1132,44 @@ components:
         acceptedAt:
           type: string
           format: date-time
+    CreateClassroomRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: ECD A Blue
+          maxLength: 80
+          minLength: 0
+        gradeId:
+          type: string
+          description: Optional grade the class is for
+          example: ecd_a
+          pattern: "^[a-z0-9_]{1,32}$"
+      required:
+      - name
+    ClassroomResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        gradeId:
+          type: string
+        joinCode:
+          type: string
+          description: Code parents enter to link their child to this class
+          example: K7QM4XPA
+        childCount:
+          type: integer
+          format: int64
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     CreateChildRequest:
       type: object
       properties:
@@ -805,8 +1186,14 @@ components:
           maxLength: 64
           minLength: 0
           pattern: "^[A-Za-z0-9_-]+$"
+        gradeId:
+          type: string
+          description: "Grade the child is in: ecd_a or ecd_b"
+          example: ecd_a
+          pattern: "^[a-z0-9_]{1,32}$"
       required:
       - displayName
+      - gradeId
     ChildResponse:
       type: object
       properties:
@@ -820,6 +1207,17 @@ components:
           format: int32
         avatarId:
           type: string
+        gradeId:
+          type: string
+          description: "Current grade, e.g. ecd_a or ecd_b"
+        access:
+          type: string
+          description: "OWNER: the caller created the profile and may edit or delete\
+            \ it. TEACHER: the caller teaches a class the child is linked to and may\
+            \ read, report on and sync it."
+          enum:
+          - OWNER
+          - TEACHER
         createdAt:
           type: string
           format: date-time
@@ -834,6 +1232,12 @@ components:
           format: uuid
           description: UUID generated by the Unity client; re-sending the same id
             is ignored
+        gradeId:
+          type: string
+          description: "Grade the game was played in (ecd_a or ecd_b), not the child's\
+            \ current grade"
+          example: ecd_a
+          pattern: "^[a-z0-9_]{1,32}$"
         sectionId:
           type: string
           pattern: "^[A-Za-z0-9_.-]{1,64}$"
@@ -854,7 +1258,8 @@ components:
         score:
           type: integer
           format: int32
-          maximum: 1000000
+          description: "Percent correct, 0-100, for every game type"
+          maximum: 100
           minimum: 0
         attempts:
           type: integer
@@ -882,6 +1287,7 @@ components:
       - durationSeconds
       - gameIndex
       - gameType
+      - gradeId
       - id
       - lessonId
       - mistakes
@@ -892,6 +1298,11 @@ components:
     LessonProgressItem:
       type: object
       properties:
+        gradeId:
+          type: string
+          description: Grade the lesson belongs to
+          example: ecd_a
+          pattern: "^[a-z0-9_]{1,32}$"
         sectionId:
           type: string
           pattern: "^[A-Za-z0-9_.-]{1,64}$"
@@ -914,6 +1325,7 @@ components:
       required:
       - completed
       - currentGameIndex
+      - gradeId
       - lessonId
       - sectionId
       - topicId
@@ -935,6 +1347,8 @@ components:
     LessonProgressResponse:
       type: object
       properties:
+        gradeId:
+          type: string
         sectionId:
           type: string
         topicId:
@@ -976,6 +1390,32 @@ components:
             local copy with it
           items:
             $ref: "#/components/schemas/LessonProgressResponse"
+    JoinClassRequest:
+      type: object
+      properties:
+        joinCode:
+          type: string
+          description: Join code given by the teacher; case and spaces are ignored
+          example: K7QM4XPA
+          maxLength: 32
+          minLength: 0
+      required:
+      - joinCode
+    LinkedClassResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        gradeId:
+          type: string
+        teacherName:
+          type: string
+        linkedAt:
+          type: string
+          format: date-time
     VerifyEmailRequest:
       type: object
       properties:
@@ -1016,12 +1456,19 @@ components:
           minLength: 0
         parentalConsent:
           type: boolean
-          description: Parent confirms consent to processing their children's learning
-            data
+          description: "The parent (or, for a teacher, the school) confirms consent\
+            \ to processing the children's learning data"
         deviceLabel:
           type: string
           maxLength: 100
           minLength: 0
+        accountType:
+          type: string
+          description: PARENT (default) or TEACHER. Teachers can create classes and
+            see linked children.
+          enum:
+          - PARENT
+          - TEACHER
       required:
       - email
       - fullName
@@ -1138,6 +1585,17 @@ components:
           type: string
           description: "Phone number, or an empty string to remove it"
           pattern: "^$|^\\+?[0-9 ()-]{7,20}$"
+    UpdateClassroomRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          minLength: 1
+          pattern: .*\S.*
+        gradeId:
+          type: string
+          pattern: "^[a-z0-9_]{1,32}$"
     UpdateChildRequest:
       type: object
       properties:
@@ -1154,6 +1612,12 @@ components:
           maxLength: 64
           minLength: 0
           pattern: "^[A-Za-z0-9_-]+$"
+        gradeId:
+          type: string
+          description: Moves the child to another grade. Results already recorded
+            keep the grade they were played in.
+          example: ecd_b
+          pattern: "^[a-z0-9_]{1,32}$"
     ChildExport:
       type: object
       properties:
@@ -1185,12 +1649,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChildExport"
+        classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClassroomResponse"
     GameResultResponse:
       type: object
       properties:
         id:
           type: string
           format: uuid
+        gradeId:
+          type: string
         sectionId:
           type: string
         topicId:
@@ -1256,10 +1726,15 @@ components:
           type: string
           format: date-time
           description: "Start of the reporting window, or absent for all-time figures"
+        gradeId:
+          type: string
+          description: "Grade the report is limited to, or absent for all grades"
         totals:
           $ref: "#/components/schemas/Totals"
         topics:
           type: array
+          description: "One entry per (gradeId, sectionId, topicId); the same topic\
+            \ in two grades is reported separately"
           items:
             $ref: "#/components/schemas/TopicPerformance"
         strongTopics:
@@ -1291,6 +1766,8 @@ components:
     RecentGame:
       type: object
       properties:
+        gradeId:
+          type: string
         sectionId:
           type: string
         topicId:
@@ -1319,6 +1796,8 @@ components:
     TopicPerformance:
       type: object
       properties:
+        gradeId:
+          type: string
         sectionId:
           type: string
         topicId:
@@ -1354,6 +1833,8 @@ components:
     TopicSummary:
       type: object
       properties:
+        gradeId:
+          type: string
         sectionId:
           type: string
         topicId:
@@ -1382,6 +1863,7 @@ components:
         averageScore:
           type: number
           format: double
+          description: Average percent correct (0-100)
     ProgressResponse:
       type: object
       properties:
@@ -1446,6 +1928,20 @@ components:
           type: string
         code:
           type: string
+          description: |-
+            Stable machine-readable error code. Clients should switch on this, not on `message`.
+            400: VALIDATION_FAILED (see fieldErrors), MALFORMED_REQUEST, INVALID_PARAMETER, INVALID_GRADE,
+            INVALID_BIRTH_YEAR, POLICY_VERSION_MISMATCH, INVALID_OR_EXPIRED_TOKEN (reset or verification link),
+            INVALID_PERIOD (admin).
+            401: AUTHENTICATION_REQUIRED, TOKEN_EXPIRED (refresh, then retry), INVALID_TOKEN, INVALID_CREDENTIALS,
+            INVALID_REFRESH_TOKEN, REFRESH_TOKEN_REUSED (every session revoked; sign in again), ACCOUNT_NOT_FOUND.
+            403: FORBIDDEN (wrong role), CHILD_NOT_OWNED (teacher tried to change a parent's child).
+            404: CHILD_NOT_FOUND, CLASS_NOT_FOUND, SUBSCRIPTION_NOT_FOUND, USER_NOT_FOUND, NOT_FOUND.
+            409: EMAIL_ALREADY_REGISTERED, CHILD_LIMIT_REACHED, DATA_CONFLICT.
+            429: RATE_LIMITED (wait for the Retry-After header).
+            500: INTERNAL_ERROR.
+            Other framework errors use the HTTP status name, e.g. METHOD_NOT_ALLOWED, UNSUPPORTED_MEDIA_TYPE.
+          example: VALIDATION_FAILED
         message:
           type: string
         path:

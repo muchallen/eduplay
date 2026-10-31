@@ -76,7 +76,7 @@ class JwtServiceTest {
     private JwtService service(String secret, List<String> previous) {
         EduplayProperties.Jwt jwt = new EduplayProperties.Jwt(secret, previous, "test", Duration.ofMinutes(15));
         EduplayProperties properties = new EduplayProperties(jwt, null, null, null, null, null, null, null, null,
-                null, null, null);
+                null, null, null, null);
         return new JwtService(properties, clock);
     }
 

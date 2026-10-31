@@ -9,6 +9,7 @@ import com.eduplay.backend.progress.service.ProgressService;
 import com.eduplay.backend.progress.service.SyncService;
 import com.eduplay.backend.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -40,9 +41,10 @@ public class ProgressController {
     }
 
     @Operation(operationId = "syncProgress", summary = "Upload progress recorded offline", description = """
-            Idempotent and safe to retry. Up to 500 game results and 500 lesson entries per request; send larger
+            Idempotent and safe to retry. Allowed for the child's owner and for teachers of a linked class, and
+            never blocked by an ended trial or subscription. Up to 500 game results and 500 lesson entries per request; send larger
             queues in several requests. Game results whose id is already stored are ignored. Lesson progress is
-            merged: completed beats incomplete, otherwise the higher currentGameIndex wins. The response holds the
+            merged per (gradeId, sectionId, topicId, lessonId): completed beats incomplete, otherwise the higher currentGameIndex wins. The response holds the
             full merged progress, which the client should store locally. Bodies may be sent with
             Content-Encoding: gzip.""")
     @PostMapping("/sync")
@@ -55,8 +57,10 @@ public class ProgressController {
     @GetMapping("/game-results")
     public PageResponse<GameResultResponse> gameResults(@AuthenticationPrincipal AuthenticatedUser user,
                                                         @PathVariable UUID childId,
+                                                        @Parameter(description = "Only results played in this grade")
+                                                        @RequestParam(required = false) String gradeId,
                                                         @RequestParam(defaultValue = "0") @Min(0) int page,
                                                         @RequestParam(defaultValue = "50") @Min(1) @Max(200) int size) {
-        return progressService.getGameResults(user.id(), childId, page, size);
+        return progressService.getGameResults(user.id(), childId, gradeId, page, size);
     }
 }

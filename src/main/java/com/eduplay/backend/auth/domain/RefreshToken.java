@@ -41,6 +41,13 @@ public class RefreshToken {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** Set when the token was exchanged for {@link #replacedById}; null when revoked by logout. */
+    @Column(name = "rotated_at")
+    private Instant rotatedAt;
+
+    @Column(name = "replaced_by_id")
+    private UUID replacedById;
+
     public RefreshToken(UUID userId, String tokenHash, String deviceLabel, Instant createdAt, Instant expiresAt) {
         this.userId = userId;
         this.tokenHash = tokenHash;
@@ -61,5 +68,11 @@ public class RefreshToken {
         if (revokedAt == null) {
             revokedAt = now;
         }
+    }
+
+    public void markRotated(UUID successorId, Instant now) {
+        revoke(now);
+        this.rotatedAt = now;
+        this.replacedById = successorId;
     }
 }

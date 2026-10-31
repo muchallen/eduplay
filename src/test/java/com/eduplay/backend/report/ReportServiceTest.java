@@ -9,14 +9,14 @@ import org.junit.jupiter.api.Test;
 
 class ReportServiceTest {
 
-    private final EduplayProperties.Report config = new EduplayProperties.Report(8.0, 5.0, 3, 10);
+    private final EduplayProperties.Report config = new EduplayProperties.Report(80, 50, 3, 10);
 
     @Test
     void ratesTopicsUsingThresholds() {
-        assertThat(ReportServiceTestAccess.rate(3, 8.0, config)).isEqualTo(Rating.STRONG);
-        assertThat(ReportServiceTestAccess.rate(3, 6.0, config)).isEqualTo(Rating.DEVELOPING);
-        assertThat(ReportServiceTestAccess.rate(3, 4.9, config)).isEqualTo(Rating.NEEDS_IMPROVEMENT);
-        assertThat(ReportServiceTestAccess.rate(2, 10.0, config)).isEqualTo(Rating.NOT_ENOUGH_DATA);
+        assertThat(ReportServiceTestAccess.rate(3, 80.0, config)).isEqualTo(Rating.STRONG);
+        assertThat(ReportServiceTestAccess.rate(3, 60.0, config)).isEqualTo(Rating.DEVELOPING);
+        assertThat(ReportServiceTestAccess.rate(3, 49.9, config)).isEqualTo(Rating.NEEDS_IMPROVEMENT);
+        assertThat(ReportServiceTestAccess.rate(2, 100.0, config)).isEqualTo(Rating.NOT_ENOUGH_DATA);
         assertThat(ReportServiceTestAccess.rate(5, null, config)).isEqualTo(Rating.NOT_ENOUGH_DATA);
     }
 }

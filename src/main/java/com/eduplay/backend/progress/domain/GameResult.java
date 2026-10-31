@@ -28,6 +28,9 @@ public class GameResult {
     @Column(name = "child_id", nullable = false)
     private UUID childId;
 
+    @Column(name = "grade_id", nullable = false, length = 32)
+    private String gradeId;
+
     @Column(name = "section_id", nullable = false, length = 64)
     private String sectionId;
 

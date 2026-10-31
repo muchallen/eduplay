@@ -2,6 +2,7 @@ package com.eduplay.backend.progress.service;
 
 import com.eduplay.backend.child.service.ChildAccessService;
 import com.eduplay.backend.common.response.PageResponse;
+import com.eduplay.backend.grade.GradeCatalog;
 import com.eduplay.backend.progress.dto.GameResultResponse;
 import com.eduplay.backend.progress.dto.LessonProgressResponse;
 import com.eduplay.backend.progress.dto.ProgressResponse;
@@ -21,26 +22,31 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProgressService {
 
     private final ChildAccessService childAccessService;
+    private final GradeCatalog gradeCatalog;
     private final LessonProgressRepository lessonProgressRepository;
     private final GameResultRepository gameResultRepository;
     private final Clock clock;
 
     @Transactional(readOnly = true)
-    public ProgressResponse getProgress(UUID parentId, UUID childId) {
-        childAccessService.requireOwnedChild(parentId, childId);
+    public ProgressResponse getProgress(UUID userId, UUID childId) {
+        childAccessService.requireAccessibleChild(userId, childId);
         return new ProgressResponse(childId, clock.instant(), lessonProgress(childId));
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<GameResultResponse> getGameResults(UUID parentId, UUID childId, int page, int size) {
-        childAccessService.requireOwnedChild(parentId, childId);
+    public PageResponse<GameResultResponse> getGameResults(UUID userId, UUID childId, String gradeId, int page,
+                                                           int size) {
+        childAccessService.requireAccessibleChild(userId, childId);
+        gradeCatalog.requireIfPresent(gradeId);
         PageRequest pageable = PageRequest.of(page, size, Sort.by("playedAt").descending().and(Sort.by("id")));
-        return PageResponse.of(gameResultRepository.findByChildId(childId, pageable), GameResultResponse::from);
+        return PageResponse.of(gradeId == null
+                ? gameResultRepository.findByChildId(childId, pageable)
+                : gameResultRepository.findByChildIdAndGradeId(childId, gradeId, pageable), GameResultResponse::from);
     }
 
-    /** Lesson progress for a child whose ownership the caller has already verified. */
+    /** Lesson progress for a child the caller has already been granted access to. */
     List<LessonProgressResponse> lessonProgress(UUID childId) {
-        return lessonProgressRepository.findByChildIdOrderBySectionIdAscTopicIdAscLessonIdAsc(childId).stream()
+        return lessonProgressRepository.findByChildIdOrderByGradeIdAscSectionIdAscTopicIdAscLessonIdAsc(childId).stream()
                 .map(LessonProgressResponse::from)
                 .toList();
     }

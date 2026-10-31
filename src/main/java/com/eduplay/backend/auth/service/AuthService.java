@@ -10,7 +10,6 @@ import com.eduplay.backend.security.JwtService;
 import com.eduplay.backend.security.RateLimitService;
 import com.eduplay.backend.subscription.service.SubscriptionService;
 import com.eduplay.backend.user.domain.ConsentRecord;
-import com.eduplay.backend.user.domain.Role;
 import com.eduplay.backend.user.domain.User;
 import com.eduplay.backend.user.dto.UserResponse;
 import com.eduplay.backend.user.repository.ConsentRecordRepository;
@@ -44,8 +43,8 @@ public class AuthService {
     private String dummyHash;
 
     /**
-     * Creates a parent account with its consent record and trial subscription, sends the
-     * verification email after commit, and signs the new parent in on this device.
+     * Creates a parent or teacher account with its consent record and trial subscription, sends
+     * the verification email after commit, and signs the new user in on this device.
      */
     @Transactional
     public AuthResponse register(RegisterRequest request, String clientIp) {
@@ -63,7 +62,7 @@ public class AuthService {
 
         Instant now = clock.instant();
         User user = new User(email, passwordEncoder.encode(request.password()), request.fullName().trim(),
-                blankToNull(request.phone()), Role.PARENT, now);
+                blankToNull(request.phone()), request.role(), now);
         try {
             user = userRepository.saveAndFlush(user);
         } catch (DataIntegrityViolationException e) {
@@ -72,7 +71,7 @@ public class AuthService {
         consentRecordRepository.save(new ConsentRecord(user.getId(), currentPolicy, now, clientIp));
         subscriptionService.startTrial(user.getId());
         emailVerificationService.sendVerification(user);
-        log.info("Registered parent account {}", user.getId());
+        log.info("Registered {} account {}", user.getRole(), user.getId());
         return issueSession(user, request.deviceLabel());
     }
 

@@ -73,8 +73,9 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      # ":80" serves plain HTTP on any address. Set SITE_ADDRESS=api.example.com in .env
-      # (with DNS pointing here) and Caddy obtains a Let's Encrypt certificate automatically.
+      # A host name (set by deploy.sh from the API_DOMAIN repository variable, or <ip>.sslip.io)
+      # makes Caddy obtain a Let's Encrypt certificate, serve HTTPS and redirect HTTP to HTTPS.
+      # ":80" serves plain HTTP on any address (local testing only).
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

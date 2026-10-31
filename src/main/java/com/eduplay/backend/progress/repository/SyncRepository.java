@@ -27,11 +27,12 @@ public class SyncRepository {
      */
     private static final String UPSERT_LESSON_PROGRESS = """
             INSERT INTO lesson_progress
-                (id, child_id, section_id, topic_id, lesson_id, current_game_index, completed, completed_at, updated_at)
+                (id, child_id, grade_id, section_id, topic_id, lesson_id, current_game_index, completed, completed_at,
+                 updated_at)
             VALUES
-                (gen_random_uuid(), :childId, :sectionId, :topicId, :lessonId, :currentGameIndex, :completed,
+                (gen_random_uuid(), :childId, :gradeId, :sectionId, :topicId, :lessonId, :currentGameIndex, :completed,
                  :completedAt, :updatedAt)
-            ON CONFLICT (child_id, section_id, topic_id, lesson_id) DO UPDATE SET
+            ON CONFLICT (child_id, grade_id, section_id, topic_id, lesson_id) DO UPDATE SET
                 current_game_index = CASE
                     WHEN lesson_progress.completed AND NOT EXCLUDED.completed THEN lesson_progress.current_game_index
                     WHEN EXCLUDED.completed AND NOT lesson_progress.completed THEN EXCLUDED.current_game_index
@@ -47,10 +48,10 @@ public class SyncRepository {
 
     private static final String INSERT_GAME_RESULT = """
             INSERT INTO game_results
-                (id, child_id, section_id, topic_id, lesson_id, game_index, game_type, score, attempts, mistakes,
-                 duration_seconds, completed, played_at, received_at)
+                (id, child_id, grade_id, section_id, topic_id, lesson_id, game_index, game_type, score, attempts,
+                 mistakes, duration_seconds, completed, played_at, received_at)
             VALUES
-                (:id, :childId, :sectionId, :topicId, :lessonId, :gameIndex, :gameType, :score, :attempts, :mistakes,
+                (:id, :childId, :gradeId, :sectionId, :topicId, :lessonId, :gameIndex, :gameType, :score, :attempts, :mistakes,
                  :durationSeconds, :completed, :playedAt, :receivedAt)
             ON CONFLICT (id) DO NOTHING
             """;
@@ -64,6 +65,7 @@ public class SyncRepository {
         SqlParameterSource[] batch = rows.stream()
                 .map(row -> new MapSqlParameterSource()
                         .addValue("childId", row.childId())
+                        .addValue("gradeId", row.gradeId())
                         .addValue("sectionId", row.sectionId())
                         .addValue("topicId", row.topicId())
                         .addValue("lessonId", row.lessonId())
@@ -88,6 +90,7 @@ public class SyncRepository {
                 .map(row -> new MapSqlParameterSource()
                         .addValue("id", row.id())
                         .addValue("childId", row.childId())
+                        .addValue("gradeId", row.gradeId())
                         .addValue("sectionId", row.sectionId())
                         .addValue("topicId", row.topicId())
                         .addValue("lessonId", row.lessonId())
@@ -112,12 +115,12 @@ public class SyncRepository {
         return instant == null ? null : instant.atOffset(ZoneOffset.UTC);
     }
 
-    public record LessonProgressRow(UUID childId, String sectionId, String topicId, String lessonId,
+    public record LessonProgressRow(UUID childId, String gradeId, String sectionId, String topicId, String lessonId,
                                     int currentGameIndex, boolean completed, Instant completedAt,
                                     Instant updatedAt) {
     }
 
-    public record GameResultRow(UUID id, UUID childId, String sectionId, String topicId, String lessonId,
+    public record GameResultRow(UUID id, UUID childId, String gradeId, String sectionId, String topicId, String lessonId,
                                 int gameIndex, String gameType, int score, int attempts, int mistakes,
                                 int durationSeconds, boolean completed, Instant playedAt) {
     }

@@ -39,7 +39,9 @@ public class OpenApiConfig {
                                 Obtain tokens from /api/v1/auth/login, then send `Authorization: Bearer <accessToken>`.
                                 Access tokens expire after 15 minutes; a 401 with code TOKEN_EXPIRED means the
                                 client should call /api/v1/auth/refresh and retry the request.
-                                Every error response uses the ApiError schema; switch on its `code` field."""))
+                                Every error response uses the ApiError schema; switch on its `code` field.
+                                Scores are percent correct (0-100). Children, lesson progress and game results carry
+                                a gradeId (ecd_a, ecd_b)."""))
                 .components(new Components().addSecuritySchemes(BEARER_SCHEME, new SecurityScheme()
                         .type(SecurityScheme.Type.HTTP)
                         .scheme("bearer")
@@ -59,8 +61,7 @@ public class OpenApiConfig {
             ModelConverters.getInstance().readAll(ApiError.class)
                     .forEach((name, schema) -> openApi.getComponents().addSchemas(name, schema));
             ApiResponse error = new ApiResponse()
-                    .description("Error. See `code` (for example VALIDATION_FAILED, TOKEN_EXPIRED, CHILD_NOT_FOUND, "
-                            + "RATE_LIMITED).")
+                    .description("Error. Switch on `code`; the ApiError schema lists every value.")
                     .content(new Content().addMediaType(org.springframework.http.MediaType.APPLICATION_JSON_VALUE,
                             new MediaType().schema(new Schema<>().$ref("#/components/schemas/ApiError"))));
             if (openApi.getPaths() != null) {

@@ -2,7 +2,8 @@
 
 REST API for **Eduplay**, an offline-first Unity Android mathematics game for young children, aligned with the
 Zimbabwe ZIMSEC curriculum. It replaces Firebase Authentication, Realtime Database and Storage for all personal
-data: parent accounts, child profiles, learning progress, game results, reports and subscriptions are stored in
+data: parent and teacher accounts, child profiles, classes, learning progress, game results, reports and
+subscriptions are stored in
 PostgreSQL, either a local container or Supabase-managed.
 
 ---
@@ -35,10 +36,11 @@ PostgreSQL, either a local container or Supabase-managed.
 
 | Capability | Summary |
 |---|---|
-| Parent accounts | Email + password registration, login, email verification, password reset. Only parents (and future teachers or admins) have credentials. **Children never log in.** |
-| Child profiles | Up to 10 per parent (configurable). Minimal data: a display name, an optional birth year and an avatar id. |
+| Accounts | Parents and teachers register with email + password; login, email verification, password reset. Only adults have credentials. **Children never log in.** |
+| Child profiles | Up to 10 per parent and 300 per teacher (configurable). Minimal data: a display name, an optional birth year, an avatar id and the grade (`ecd_a`, `ecd_b`). |
+| Classes | Teachers create classes; parents link a child with the class join code. Teachers can read, report on and sync linked children but never edit them. |
 | Offline sync | The game queues lesson progress and game results on the device and uploads them with `POST /children/{id}/sync` when it is back online. Uploads are idempotent and safe to retry. |
-| Reports | Parent dashboard per child: totals, time spent, averages, per-topic performance, strong topics, topics needing improvement and recent activity. |
+| Reports | Dashboard per child for its parent and teachers: totals, time spent, average score (percent correct), per-grade per-topic performance, strong topics, topics needing improvement and recent activity. Optional grade filter. |
 | Subscriptions | 14-day trial on registration, with `TRIAL / ACTIVE / EXPIRED / CANCELLED` states and an admin endpoint for payment-provider integration. |
 | Privacy | Parental consent is recorded with the policy version. Accounts can export all their data or delete it; deleted data is hard-deleted after 30 days. |
 
@@ -58,7 +60,9 @@ Layered packages under `com.eduplay.backend`:
 | `security` | Spring Security filter chains, JWT issue/validate, rate limiting, JSON 401/403 |
 | `auth` | Register, login, refresh-token rotation, logout, password reset, email verification |
 | `user` | `/me` profile, consent, data export, account deletion |
-| `child` | Child profiles and **`ChildAccessService`**, the single ownership gate for all child data |
+| `child` | Child profiles and **`ChildAccessService`**, the single access gate for all child data |
+| `classroom` | Teacher classes, join codes and class membership |
+| `grade` | The configured list of grades (`GRADES`) and grade validation |
 | `progress` | Progress reads, game-result history and the offline **sync** (SQL upserts) |
 | `report` | Dashboard aggregates computed in PostgreSQL |
 | `subscription` | Trial creation, status, expiry job, admin updates |
@@ -73,10 +77,15 @@ Entities never leave the service layer; controllers only exchange DTOs.
 
 * **Stateless JWT access tokens (15 min) and opaque rotating refresh tokens (30 days).** Refresh tokens are
   256-bit random strings. Only their SHA-256 hash is stored. Each refresh revokes the presented token and issues a new
-  one. Presenting an already-revoked token is treated as theft: **all sessions of the user are revoked.**
-* **Ownership by construction.** Every child-scoped query goes through
-  `ChildAccessService.requireOwnedChild(parentId, childId)`, which matches the child id *and* the parent id from
-  the verified JWT. Another family's child returns `404 CHILD_NOT_FOUND`, never `403`, so ids cannot be probed.
+  one. Presenting an already-revoked token is treated as theft: **all sessions of the user are revoked**, with one
+  exception for weak connections: a retry with the same token within 60 seconds receives the *same* replacement
+  (see [Sessions on weak connections](#sessions-on-weak-connections)).
+* **Access by construction.** Every child-scoped query goes through `ChildAccessService`, which matches the child
+  id against the user id from the verified JWT: the owner (the account that created the child) may do everything;
+  a teacher of a linked class may read, report and sync. A child the caller cannot reach returns
+  `404 CHILD_NOT_FOUND`, never `403`, so ids cannot be probed. A teacher trying to edit gets `403 CHILD_NOT_OWNED`.
+* **Grades are part of every record's identity.** Topic ids repeat across grades, so lesson progress is keyed by
+  (child, grade, section, topic, lesson) and each game result keeps the grade it was played in.
 * **Sync merges in SQL.** `INSERT … ON CONFLICT` makes merges atomic and race-free across devices (see
   [Offline synchronisation](#offline-synchronisation)).
 * **Append-only game results**, enforced by a database trigger that rejects `UPDATE`.
@@ -149,7 +158,8 @@ value. Never commit `.env`.
 | `JWT_SECRET` | **required** | Base64, ≥ 32 bytes. The app refuses to start without it. |
 | `JWT_PREVIOUS_SECRETS` | – | Comma-separated retired secrets that are still accepted (rotation) |
 | `JWT_ISSUER` | `eduplay-backend` | `iss` claim |
-| `JWT_ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | `15m` / `30d` | Token lifetimes |
+| `JWT_ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | `15m` / `30d` | Token lifetimes; the refresh lifetime restarts on every refresh |
+| `REFRESH_TOKEN_REUSE_GRACE` | `60s` | A rotated refresh token retried within this period gets the same replacement |
 | `PASSWORD_RESET_TTL` / `EMAIL_VERIFICATION_TTL` | `30m` / `24h` | Email token lifetimes |
 | `MAIL_ENABLED` | `true` | `false` skips sending (logged without addresses) |
 | `MAIL_FROM` | – | Sender address |
@@ -160,8 +170,9 @@ value. Never commit `.env`.
 | `DELETED_DATA_RETENTION` | `30d` | Delay before soft-deleted accounts and children are hard-deleted |
 | `RETENTION_PURGE_CRON` | `0 30 2 * * *` | Purge schedule (UTC) |
 | `SUBSCRIPTION_TRIAL_PERIOD` | `14d` | Trial length |
-| `MAX_CHILDREN_PER_PARENT` | `10` | Child-profile limit |
-| `REPORT_STRONG_SCORE_THRESHOLD` / `REPORT_WEAK_SCORE_THRESHOLD` / `REPORT_MIN_GAMES_FOR_RATING` | `8.0` / `5.0` / `3` | Topic rating rules |
+| `MAX_CHILDREN_PER_PARENT` / `MAX_CHILDREN_PER_TEACHER` | `10` / `300` | Child-profile limits per account |
+| `GRADES` | `ecd_a,ecd_b` | Grades the app teaches |
+| `REPORT_STRONG_SCORE_THRESHOLD` / `REPORT_WEAK_SCORE_THRESHOLD` / `REPORT_MIN_GAMES_FOR_RATING` | `80` / `50` / `3` | Topic rating rules (scores are percent correct) |
 | `RATE_LIMIT_ENABLED` | `true` | In-memory login, registration and reset limits |
 | `CORS_ALLOWED_ORIGINS` | empty | Comma-separated browser origins. The Unity app does not need CORS. |
 | `SWAGGER_ENABLED` | `false` (prod) | Expose `/swagger-ui.html` and `/v3/api-docs` |
@@ -273,9 +284,9 @@ a reverse proxy.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/register` | – | Create a parent account (requires `policyVersion` and `parentalConsent: true`) → tokens |
+| POST | `/auth/register` | – | Create a parent (default) or teacher account (`accountType: "TEACHER"`); requires `policyVersion` and `parentalConsent: true` → tokens |
 | POST | `/auth/login` | – | Sign in → tokens |
-| POST | `/auth/refresh` | – | Rotate a refresh token → new access and refresh tokens |
+| POST | `/auth/refresh` | – | Rotate a refresh token → new access and refresh tokens (same replacement on a retry within 60 s) |
 | POST | `/auth/logout` | – | Revoke one refresh token (this device) |
 | POST | `/auth/logout-all` | Bearer | Revoke all sessions |
 | POST | `/auth/password-reset/request` | – | Always `202` with a generic message |
@@ -285,12 +296,19 @@ a reverse proxy.
 | GET / PATCH / DELETE | `/me` | Bearer | Profile; partial update; delete (body `{password}`) |
 | GET | `/me/export` | Bearer | Full data export (JSON) |
 | POST | `/me/consent` | Bearer | Accept a new privacy-policy version |
-| GET / POST | `/children` | Bearer | List (paginated) or create child profiles |
-| GET / PATCH / DELETE | `/children/{childId}` | Bearer | Read, update or delete a child profile |
+| GET / POST | `/children` | Bearer | List (paginated: own children plus, for teachers, linked children) or create child profiles (`gradeId` required) |
+| GET / PATCH / DELETE | `/children/{childId}` | Bearer | Read (owner or teacher); update or delete (owner only) |
 | GET | `/children/{childId}/progress` | Bearer | Merged lesson progress and `serverTime` |
 | POST | `/children/{childId}/sync` | Bearer | Offline upload (see below) |
-| GET | `/children/{childId}/game-results` | Bearer | Paginated game history, newest first |
-| GET | `/children/{childId}/report?days=N` | Bearer | Parent dashboard |
+| GET | `/children/{childId}/game-results?gradeId=` | Bearer | Paginated game history, newest first |
+| GET | `/children/{childId}/report?days=N&gradeId=` | Bearer | Dashboard, optionally for one grade |
+| GET / POST | `/children/{childId}/classes` | Bearer (owner) | Classes the child is in; join a class with `{joinCode}` |
+| DELETE | `/children/{childId}/classes/{classId}` | Bearer (owner) | Remove the child from a class |
+| GET / POST | `/classes` | Bearer (TEACHER) | List or create the teacher's classes (response includes `joinCode`) |
+| GET / PATCH / DELETE | `/classes/{classId}` | Bearer (TEACHER) | Read, update or delete a class (children are not affected) |
+| POST | `/classes/{classId}/join-code` | Bearer (TEACHER) | Replace the join code |
+| GET | `/classes/{classId}/children` | Bearer (TEACHER) | Children in the class (paginated) |
+| PUT / DELETE | `/classes/{classId}/children/{childId}` | Bearer (TEACHER) | Add a child the teacher created; remove any child |
 | GET | `/subscription` | Bearer | Current subscription status |
 | PUT | `/admin/users/{userId}/subscription` | Bearer (ADMIN) | Set plan, status and period |
 
@@ -309,10 +327,19 @@ a reverse proxy.
    "fieldErrors":[{"field":"gameResults[3].score","message":"must be greater than or equal to 0"}]}
   ```
 
-  Useful codes: `VALIDATION_FAILED`, `MALFORMED_REQUEST`, `INVALID_CREDENTIALS`, `TOKEN_EXPIRED`,
-  `INVALID_TOKEN`, `INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_REUSED`, `EMAIL_ALREADY_REGISTERED`,
-  `POLICY_VERSION_MISMATCH`, `CHILD_NOT_FOUND`, `CHILD_LIMIT_REACHED`, `RATE_LIMITED` (with `Retry-After`),
-  `INVALID_OR_EXPIRED_TOKEN`.
+  Every `code` value:
+
+  | Status | Codes |
+  |---|---|
+  | 400 | `VALIDATION_FAILED` (see `fieldErrors`), `MALFORMED_REQUEST`, `INVALID_PARAMETER`, `INVALID_GRADE`, `INVALID_BIRTH_YEAR`, `POLICY_VERSION_MISMATCH`, `INVALID_OR_EXPIRED_TOKEN` (reset or verification link), `INVALID_PERIOD` (admin) |
+  | 401 | `AUTHENTICATION_REQUIRED`, `TOKEN_EXPIRED` (refresh, then retry), `INVALID_TOKEN`, `INVALID_CREDENTIALS`, `INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_REUSED` (all sessions revoked), `ACCOUNT_NOT_FOUND` |
+  | 403 | `FORBIDDEN` (wrong role), `CHILD_NOT_OWNED` |
+  | 404 | `CHILD_NOT_FOUND`, `CLASS_NOT_FOUND`, `SUBSCRIPTION_NOT_FOUND`, `USER_NOT_FOUND`, `NOT_FOUND` |
+  | 409 | `EMAIL_ALREADY_REGISTERED`, `CHILD_LIMIT_REACHED`, `DATA_CONFLICT` |
+  | 429 | `RATE_LIMITED` (wait for `Retry-After` seconds) |
+  | 500 | `INTERNAL_ERROR` |
+
+  Other framework errors use the HTTP status name (`METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, …).
 
 ### Offline synchronisation
 
@@ -321,12 +348,12 @@ a reverse proxy.
 ```json
 {
   "lessonProgress": [
-    {"sectionId": "number", "topicId": "counting", "lessonId": "level1",
+    {"gradeId": "ecd_a", "sectionId": "number", "topicId": "counting", "lessonId": "level1",
      "currentGameIndex": 3, "completed": false, "updatedAt": "2026-10-27T08:15:00Z"}
   ],
   "gameResults": [
-    {"id": "0f8e2c4a-0000-0000-0000-000000000001", "sectionId": "number", "topicId": "counting",
-     "lessonId": "level1", "gameIndex": 2, "gameType": "MatchingGame", "score": 8, "attempts": 1,
+    {"id": "0f8e2c4a-0000-0000-0000-000000000001", "gradeId": "ecd_a", "sectionId": "number",
+     "topicId": "counting", "lessonId": "level1", "gameIndex": 2, "gameType": "MatchingGame", "score": 80, "attempts": 1,
      "mistakes": 2, "durationSeconds": 74, "completed": true, "playedAt": "2026-10-27T08:14:10Z"}
   ]
 }
@@ -336,7 +363,7 @@ Response:
 
 ```json
 {"childId":"…","serverTime":"2026-10-27T08:20:01Z","acceptedGameResults":1,"duplicateGameResults":0,
- "lessonProgress":[{"sectionId":"number","topicId":"counting","lessonId":"level1","currentGameIndex":3,
+ "lessonProgress":[{"gradeId":"ecd_a","sectionId":"number","topicId":"counting","lessonId":"level1","currentGameIndex":3,
                     "completed":false,"updatedAt":"2026-10-27T08:15:00Z"}]}
 ```
 
@@ -345,12 +372,17 @@ Server rules:
 1. Game results are append-only and keyed by the client UUID. A result whose id is already stored is skipped and
    counted in `duplicateGameResults`, including a repeated id within the same batch.
 2. At most 500 game results and 500 lesson entries per request. Larger queues go in several requests.
-3. Lesson merge: **completed always beats incomplete.** If both are incomplete, the **higher `currentGameIndex`**
+3. Lesson merge, per (`gradeId`, `sectionId`, `topicId`, `lessonId`): **completed always beats incomplete.** If both are incomplete, the **higher `currentGameIndex`**
    wins. If both are complete, the original `completedAt` is kept. `updatedAt` only moves forward.
 4. Timestamps in the future (device clock drift) are clamped to the server time. Use `serverTime` to detect drift.
 5. One database transaction per request. An invalid item rejects the whole batch with `400` and nothing is
    written, so the client can fix or drop the bad item and resend.
-6. Requests can be gzip-compressed (`Content-Encoding: gzip`, up to 10 MB decompressed). Responses over 1 KB are
+6. `gradeId` is required on every item and must be a configured grade (`ecd_a`, `ecd_b`); send the grade the
+   lesson or game belongs to, not the child's current grade. `score` is **percent correct, 0–100**, for every game
+   type.
+7. Sync is open to the child's owner and to teachers of a linked class, and it **never depends on the
+   subscription**: results are accepted after a trial or subscription ends, so no learning data is lost.
+8. Requests can be gzip-compressed (`Content-Encoding: gzip`, up to 10 MB decompressed). Responses over 1 KB are
    gzip-compressed when the client sends `Accept-Encoding: gzip`.
 
 **Recommended Unity client loop**
@@ -362,6 +394,43 @@ Server rules:
    *same* batch. This is safe because sync is idempotent.
 5. On network errors or `5xx`: keep the queue and retry later with exponential backoff.
 6. On `401 REFRESH_TOKEN_REUSED` or `INVALID_REFRESH_TOKEN`: keep the queue and ask the parent to sign in again.
+
+### Sessions on weak connections
+
+* Access tokens last 15 minutes. Refresh tokens last **30 days from their last use**
+  (`REFRESH_TOKEN_TTL`); every refresh issues a new 30-day token. A device can therefore stay offline for up to 30
+  days and still refresh without a password; after that a parent or teacher must sign in again. Queued results are
+  kept on the device and uploaded after sign-in.
+* If a refresh response is lost, retry with the **same** refresh token. Within 60 seconds
+  (`REFRESH_TOKEN_REUSE_GRACE`) the server returns the same replacement refresh token (and a fresh access token),
+  as long as that replacement has not been used yet. Two concurrent refreshes from one device also get the same
+  token.
+* Presenting a rotated token after the grace period, a token whose replacement was already used, or a logged-out
+  token is treated as theft: every session of the account is revoked (`REFRESH_TOKEN_REUSED`).
+* Email verification is **not** required to use the API: a new parent can create children, play and sync
+  straight away. `user.emailVerified` tells the app whether to show a reminder.
+
+### Grades
+
+Grades are configured with `GRADES` (default `ecd_a,ecd_b`); an unknown grade returns `400 INVALID_GRADE`.
+Children have a current `gradeId` (required on create, can be changed with `PATCH`). Lesson progress and game
+results carry the grade they belong to, so moving a child to ECD B leaves their ECD A history intact. Reports list
+topics per grade and accept `?gradeId=` to limit every figure to one grade.
+
+### Teachers and classes
+
+1. A teacher registers with `"accountType": "TEACHER"` and creates a class: `POST /classes {"name", "gradeId"}`.
+   The response contains an 8-character `joinCode`.
+2. A parent links their child: `POST /children/{childId}/classes {"joinCode": "K7QM4XPA"}` (case and spaces are
+   ignored; 10 attempts per hour per account). The parent sees the class and teacher name and can remove the link
+   at any time.
+3. Teachers can also create children themselves, for pupils without a parent account, and add them with
+   `PUT /classes/{classId}/children/{childId}`.
+4. A teacher sees linked children in `GET /children` (with `"access": "TEACHER"`) and `GET /classes/{id}/children`,
+   and can sync and read progress, game results and reports for them.
+5. **Who may edit:** a child belongs to the account that created it. Only that owner can edit or delete it, or
+   manage its class links. Teachers get `403 CHILD_NOT_OWNED`. One child can be in several classes, so a parent and
+   any number of teachers can follow the same child.
 
 ## 12. Database migrations
 
@@ -562,7 +631,7 @@ refresh tokens:
 |---|---|---|
 | **Build and test** | PRs and `main` | `./mvnw verify` with Testcontainers PostgreSQL |
 | **Build and push image** | `main` only | Builds the `linux/amd64` image and pushes it to ECR as `eduplay-backend:<commit-sha>`. Tags are immutable. |
-| **Deploy to EC2** | `main` only | Opens SSH to the instance with EC2 Instance Connect, uploads `deploy/`, runs `deploy.sh <image>`, then smoke-tests `/livez` |
+| **Deploy to EC2** | `main` only | Opens SSH to the instance with EC2 Instance Connect, uploads `deploy/`, runs `deploy.sh <image> <domain>`, then smoke-tests `https://<domain>/livez` and the HTTP→HTTPS redirect |
 
 **AWS resources:** region `us-east-1`; ECR repository
 `383975042508.dkr.ecr.us-east-1.amazonaws.com/eduplay-backend` (scan on push, keeps the last 30 images);
@@ -570,21 +639,27 @@ instance `i-089ab8d959ae52044` (Ubuntu, user `ubuntu`).
 
 **GitHub configuration:** secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, and the variable
 `EC2_HOST_KEY` (the server's `ssh-ed25519 …` host key, used for strict host verification). If the instance is
-replaced, update the variable with `ssh-keyscan -t ed25519 <ip>`.
+replaced, update the variable with `ssh-keyscan -t ed25519 <ip>`. Optional variable `API_DOMAIN`: the API's
+host name (see HTTPS below).
 
 **On the server** (`/opt/eduplay`), the stack runs as Caddy (ports 80/443) → app → PostgreSQL 16, with data in
 Docker volumes. The first deployment generates `/opt/eduplay/.env` with new random database and JWT secrets.
 Those secrets never leave the server, and later deployments keep them. Edit that file to configure SMTP,
-Swagger, CORS or a domain, then re-run the latest deployment from the Actions tab or restart the stack:
+Swagger or CORS, then re-run the latest deployment from the Actions tab or restart the stack:
 
 ```bash
 sudo docker compose -f /opt/eduplay/docker-compose.prod.yml --project-directory /opt/eduplay up -d
 ```
 
-**HTTPS:** point a DNS name at the instance (ideally through an Elastic IP, because the default public IP
-changes when the instance is stopped), set `SITE_ADDRESS=api.your-domain` in `/opt/eduplay/.env` and restart.
-Caddy obtains and renews the Let's Encrypt certificate automatically. Until then the API is served over
-**plain HTTP**, so do not use real parent accounts on it.
+**HTTPS:** the API is always served over HTTPS, and Caddy redirects HTTP to HTTPS with `308`. Caddy obtains and
+renews the Let's Encrypt certificate automatically (ports 80 and 443 must stay open).
+
+* Without `API_DOMAIN`, the host name is `<ip-with-dashes>.sslip.io` (for example `54-242-62-156.sslip.io`), a
+  public wildcard DNS name that resolves to the instance IP. It works immediately, but it changes whenever the
+  public IP changes, so treat it as a test address.
+* For production, attach an **Elastic IP** to the instance (the default public IP changes when it is stopped),
+  create a DNS `A` record such as `api.eduplay.co.zw` pointing at it, and set the repository variable
+  `API_DOMAIN=api.eduplay.co.zw`. The next deployment switches to it.
 
 **Rollback:** re-run an earlier successful workflow run from the Actions tab, or on the server:
 `sudo /opt/eduplay/deploy.sh 383975042508.dkr.ecr.us-east-1.amazonaws.com/eduplay-backend:<older-sha>`
