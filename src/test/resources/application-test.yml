@@ -1,0 +1,38 @@
+# Test-only configuration. The JWT secret below is a throwaway value used solely by the test suite.
+eduplay:
+  bcrypt-strength: 4
+  jwt:
+    secret: dGVzdC1vbmx5LXNlY3JldC1rZXktZm9yLWVkdXBsYXktaW50ZWdyYXRpb24tdGVzdHMtMDAwMQ==
+  mail:
+    enabled: false
+  rate-limit:
+    login-per-ip:
+      capacity: 100000
+      window: 1m
+    login-per-account:
+      capacity: 100000
+      window: 1m
+    register-per-ip:
+      capacity: 100000
+      window: 1m
+    password-reset-per-ip:
+      capacity: 100000
+      window: 1m
+    password-reset-per-account:
+      capacity: 100000
+      window: 1m
+    email-verification-per-account:
+      capacity: 100000
+      window: 1m
+
+management:
+  server:
+    port: -1
+
+logging:
+  level:
+    com.eduplay: INFO
+
+springdoc:
+  api-docs:
+    enabled: true

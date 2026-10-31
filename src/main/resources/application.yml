@@ -1,0 +1,177 @@
+# Shared configuration. Every secret and environment-specific value comes from
+# environment variables; see .env.example for the full list.
+#
+# The JDBC URL is assembled by DatabaseUrlEnvironmentPostProcessor from either
+# DATABASE_URL (JDBC or postgres:// form) or DB_HOST/DB_PORT/DB_NAME/DB_SSL_MODE.
+
+spring:
+  application:
+    name: eduplay-backend
+  main:
+    banner-mode: off
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:30s}
+  datasource:
+    username: ${DB_USERNAME:eduplay}
+    password: ${DB_PASSWORD:}
+    hikari:
+      pool-name: eduplay-db
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 1500000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: UTC
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SMTP_AUTH:true}
+          starttls:
+            enable: ${SMTP_STARTTLS:true}
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+  task:
+    execution:
+      pool:
+        core-size: 2
+        max-size: 4
+        queue-capacity: 500
+      thread-name-prefix: eduplay-async-
+      shutdown:
+        await-termination: true
+        await-termination-period: 20s
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:none}
+  error:
+    include-message: never
+    include-stacktrace: never
+  compression:
+    enabled: true
+    mime-types: application/json
+    min-response-size: 1024
+  tomcat:
+    connection-timeout: 20s
+    max-swallow-size: 2MB
+    max-http-form-post-size: 2MB
+
+management:
+  server:
+    port: ${MANAGEMENT_PORT:8081}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+        add-additional-paths: true
+      show-details: never
+      group:
+        readiness:
+          include: readinessState,db
+  health:
+    mail:
+      enabled: false
+  info:
+    env:
+      enabled: false
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+    operations-sorter: alpha
+  default-produces-media-type: application/json
+
+eduplay:
+  jwt:
+    secret: ${JWT_SECRET:}
+    previous-secrets: ${JWT_PREVIOUS_SECRETS:}
+    issuer: ${JWT_ISSUER:eduplay-backend}
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
+  refresh-token:
+    ttl: ${REFRESH_TOKEN_TTL:30d}
+  password-reset:
+    ttl: ${PASSWORD_RESET_TTL:30m}
+  email-verification:
+    ttl: ${EMAIL_VERIFICATION_TTL:24h}
+  privacy:
+    policy-version: ${PRIVACY_POLICY_VERSION:2026-01}
+  retention:
+    deleted-account-retention: ${DELETED_DATA_RETENTION:30d}
+    purge-cron: ${RETENTION_PURGE_CRON:0 30 2 * * *}
+  subscription:
+    trial-period: ${SUBSCRIPTION_TRIAL_PERIOD:14d}
+    expiry-cron: ${SUBSCRIPTION_EXPIRY_CRON:0 */15 * * * *}
+  children:
+    max-per-parent: ${MAX_CHILDREN_PER_PARENT:10}
+  report:
+    strong-score-threshold: ${REPORT_STRONG_SCORE_THRESHOLD:8.0}
+    weak-score-threshold: ${REPORT_WEAK_SCORE_THRESHOLD:5.0}
+    min-games-for-rating: ${REPORT_MIN_GAMES_FOR_RATING:3}
+    recent-activity-limit: 10
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+  mail:
+    enabled: ${MAIL_ENABLED:true}
+    from: ${MAIL_FROM:no-reply@eduplay.local}
+    password-reset-url: ${APP_PASSWORD_RESET_URL:https://eduplay.example/reset-password}
+    email-verification-url: ${APP_EMAIL_VERIFICATION_URL:https://eduplay.example/verify-email}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    login-per-ip:
+      capacity: 30
+      window: 15m
+    login-per-account:
+      capacity: 5
+      window: 15m
+    register-per-ip:
+      capacity: 10
+      window: 1h
+    password-reset-per-ip:
+      capacity: 10
+      window: 1h
+    password-reset-per-account:
+      capacity: 3
+      window: 1h
+    email-verification-per-account:
+      capacity: 3
+      window: 1h
+
+logging:
+  level:
+    root: INFO
+    org.hibernate.SQL: WARN

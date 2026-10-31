@@ -1,0 +1,119 @@
+# Eduplay backend
+#
+#   Local PostgreSQL : docker compose --profile local up -d --build
+#   Supabase         : docker compose --profile supabase up -d --build
+#   + Mailpit (dev)  : add --profile mail  (web UI on http://localhost:8025)
+#   Run migrations   : docker compose --profile migrate run --rm flyway migrate
+#
+# All configuration comes from .env (copy .env.example).
+
+name: eduplay
+
+x-app: &app
+  build:
+    context: .
+  image: eduplay-backend:${APP_VERSION:-latest}
+  env_file: ${ENV_FILE:-.env}
+  environment:
+    SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+    MANAGEMENT_PORT: "8081"
+    SERVER_PORT: "8080"
+  ports:
+    - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8080}:8080"
+  restart: unless-stopped
+  stop_grace_period: 45s
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  mem_limit: ${APP_MEMORY_LIMIT:-1g}
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/actuator/health/readiness >/dev/null || exit 1"]
+    interval: 30s
+    timeout: 5s
+    start_period: 90s
+    retries: 3
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "10"
+  networks:
+    - backend
+
+services:
+  postgres:
+    profiles: ["local"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required}
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      TZ: UTC
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - backend
+    # Not published to the host. For local tools, uncomment:
+    # ports: ["127.0.0.1:5432:5432"]
+
+  app:
+    <<: *app
+    profiles: ["local"]
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      MANAGEMENT_PORT: "8081"
+      SERVER_PORT: "8080"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DATABASE_URL: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app-supabase:
+    <<: *app
+    profiles: ["supabase"]
+
+  mailpit:
+    profiles: ["mail"]
+    image: axllent/mailpit:v1.27
+    ports:
+      - "127.0.0.1:8025:8025"
+    networks:
+      - backend
+
+  flyway:
+    profiles: ["migrate"]
+    image: flyway/flyway:11-alpine
+    environment:
+      FLYWAY_URL: ${FLYWAY_URL:-jdbc:postgresql://${DB_HOST:-postgres}:${DB_PORT:-5432}/${DB_NAME}?sslmode=${DB_SSL_MODE:-prefer}}
+      FLYWAY_USER: ${DB_USERNAME}
+      FLYWAY_PASSWORD: ${DB_PASSWORD}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_CONNECT_RETRIES: "10"
+    volumes:
+      - ./src/main/resources/db/migration:/flyway/sql:ro
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+
+networks:
+  backend:
+    driver: bridge

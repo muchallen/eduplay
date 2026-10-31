@@ -1,0 +1,18 @@
+# Production. Swagger is off unless SWAGGER_ENABLED=true is set explicitly.
+# Run behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik) that sets
+# X-Forwarded-For / X-Forwarded-Proto.
+
+server:
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:native}
+
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:15}
+
+logging:
+  structured:
+    format:
+      console: ecs
+  level:
+    com.eduplay: INFO
