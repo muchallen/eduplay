@@ -27,6 +27,7 @@ PostgreSQL, either a local container or Supabase-managed.
 16. [JWT secret rotation](#16-jwt-secret-rotation)
 17. [Security considerations](#17-security-considerations)
 18. [Operations: monitoring and logging](#18-operations-monitoring-and-logging)
+19. [CI/CD: GitHub Actions → ECR → EC2](#19-cicd-github-actions--ecr--ec2)
 
 ---
 
@@ -552,3 +553,39 @@ refresh tokens:
   deleted more than 30 days ago, plus expired tokens) daily at 02:30.
 * Suggested alerts: readiness failing, the 5xx rate, p95 latency on `/sync`, Hikari pending connections, and disk
   usage of the PostgreSQL volume.
+
+## 19. CI/CD: GitHub Actions → ECR → EC2
+
+`.github/workflows/ci-cd.yml` runs on every pull request and push to `main`:
+
+| Job | Runs on | What it does |
+|---|---|---|
+| **Build and test** | PRs and `main` | `./mvnw verify` with Testcontainers PostgreSQL |
+| **Build and push image** | `main` only | Builds the `linux/amd64` image and pushes it to ECR as `eduplay-backend:<commit-sha>`. Tags are immutable. |
+| **Deploy to EC2** | `main` only | Opens SSH to the instance with EC2 Instance Connect, uploads `deploy/`, runs `deploy.sh <image>`, then smoke-tests `/livez` |
+
+**AWS resources:** region `us-east-1`; ECR repository
+`383975042508.dkr.ecr.us-east-1.amazonaws.com/eduplay-backend` (scan on push, keeps the last 30 images);
+instance `i-089ab8d959ae52044` (Ubuntu, user `ubuntu`).
+
+**GitHub configuration:** secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, and the variable
+`EC2_HOST_KEY` (the server's `ssh-ed25519 …` host key, used for strict host verification). If the instance is
+replaced, update the variable with `ssh-keyscan -t ed25519 <ip>`.
+
+**On the server** (`/opt/eduplay`), the stack runs as Caddy (ports 80/443) → app → PostgreSQL 16, with data in
+Docker volumes. The first deployment generates `/opt/eduplay/.env` with new random database and JWT secrets.
+Those secrets never leave the server, and later deployments keep them. Edit that file to configure SMTP,
+Swagger, CORS or a domain, then re-run the latest deployment from the Actions tab or restart the stack:
+
+```bash
+sudo docker compose -f /opt/eduplay/docker-compose.prod.yml --project-directory /opt/eduplay up -d
+```
+
+**HTTPS:** point a DNS name at the instance (ideally through an Elastic IP, because the default public IP
+changes when the instance is stopped), set `SITE_ADDRESS=api.your-domain` in `/opt/eduplay/.env` and restart.
+Caddy obtains and renews the Let's Encrypt certificate automatically. Until then the API is served over
+**plain HTTP**, so do not use real parent accounts on it.
+
+**Rollback:** re-run an earlier successful workflow run from the Actions tab, or on the server:
+`sudo /opt/eduplay/deploy.sh 383975042508.dkr.ecr.us-east-1.amazonaws.com/eduplay-backend:<older-sha>`
+(log in to ECR first, as the workflow does).

@@ -1,0 +1,150 @@
+# CI/CD for the Eduplay backend.
+#
+#   pull request  -> build + tests
+#   push to main  -> build + tests -> image pushed to Amazon ECR -> deployed to EC2
+#
+# Required repository secrets:   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+# Required repository variable:  EC2_HOST_KEY  (the host's "ssh-ed25519 AAAA..." public key,
+#                                 used to verify the server before deploying to it)
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: eduplay-backend
+  EC2_INSTANCE_ID: i-089ab8d959ae52044
+  EC2_USER: ubuntu
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Integration tests start PostgreSQL 16 with Testcontainers (Docker is available on the runner).
+      - name: Build and run tests
+        run: ./mvnw -B verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
+
+  image:
+    name: Build and push image
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Tags are immutable in ECR: every image is tagged with its commit.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to EC2
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      SSH_OPTS: -i /home/runner/.ssh/deploy -o UserKnownHostsFile=/home/runner/.ssh/known_hosts -o StrictHostKeyChecking=yes -o ControlPath=/home/runner/.ssh/cm-%r@%h
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # EC2 Instance Connect authorises a throwaway key for 60 seconds; the SSH master
+      # connection opened inside that window is reused by the following steps.
+      - name: Open SSH connection (EC2 Instance Connect)
+        env:
+          EC2_HOST_KEY: ${{ vars.EC2_HOST_KEY }}
+        run: |
+          if [ -z "$EC2_HOST_KEY" ]; then
+            echo "::error::Repository variable EC2_HOST_KEY is not set"; exit 1
+          fi
+          host=$(aws ec2 describe-instances --instance-ids "$EC2_INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          install -d -m 700 ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -C "github-actions-${GITHUB_RUN_ID}" -f ~/.ssh/deploy
+          echo "$host $EC2_HOST_KEY" > ~/.ssh/known_hosts
+          aws ec2-instance-connect send-ssh-public-key --instance-id "$EC2_INSTANCE_ID" \
+            --instance-os-user "$EC2_USER" --ssh-public-key file://$HOME/.ssh/deploy.pub >/dev/null
+          ssh $SSH_OPTS -o ControlMaster=yes -o ControlPersist=15m -o ConnectTimeout=20 -fN "$EC2_USER@$host"
+          echo "EC2_HOST=$host" >> "$GITHUB_ENV"
+
+      - name: Upload deployment files
+        run: |
+          tar -C deploy -cz . | ssh $SSH_OPTS "$EC2_USER@$EC2_HOST" \
+            'sudo install -d -m 750 /opt/eduplay && sudo tar -xz --no-same-owner -C /opt/eduplay && sudo chmod 750 /opt/eduplay/deploy.sh'
+
+      - name: Deploy release
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          aws ecr get-login-password | ssh $SSH_OPTS "$EC2_USER@$EC2_HOST" \
+            "sudo docker login --username AWS --password-stdin $REGISTRY"
+          ssh $SSH_OPTS "$EC2_USER@$EC2_HOST" \
+            "sudo /opt/eduplay/deploy.sh $REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+
+      - name: Smoke test
+        run: |
+          curl -fsS --retry 12 --retry-delay 5 --retry-all-errors "http://$EC2_HOST/livez"
+          echo
+          echo "### Deployed \`${GITHUB_SHA::12}\` to http://$EC2_HOST" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Close SSH connection
+        if: always()
+        run: ssh $SSH_OPTS -O exit "$EC2_USER@${EC2_HOST:-none}" 2>/dev/null || true

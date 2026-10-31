@@ -1,0 +1,97 @@
+# Production stack on the EC2 host (/opt/eduplay). Managed by deploy.sh; the CI/CD
+# pipeline uploads this directory and sets APP_IMAGE in .env on every release.
+#
+#   Caddy :80/:443  ->  app :8080  ->  postgres :5432
+#
+# Manual operations on the host:
+#   cd /opt/eduplay
+#   sudo docker compose -f docker-compose.prod.yml ps
+#   sudo docker compose -f docker-compose.prod.yml logs -f app
+
+name: eduplay
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required}
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      TZ: UTC
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "10"
+    networks:
+      - backend
+
+  app:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DATABASE_URL: ""
+      SERVER_PORT: "8080"
+      MANAGEMENT_PORT: "8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${APP_MEMORY_LIMIT:-1536m}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/actuator/health/readiness >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 4
+    logging: *logging
+    networks:
+      - backend
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # ":80" serves plain HTTP on any address. Set SITE_ADDRESS=api.example.com in .env
+      # (with DNS pointing here) and Caddy obtains a Let's Encrypt certificate automatically.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    logging: *logging
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  backend:
+    driver: bridge
