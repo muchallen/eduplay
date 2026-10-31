@@ -42,6 +42,10 @@ public class SecurityConfig {
     private final JwtService jwtService;
     private final RestAuthenticationHandlers authenticationHandlers;
 
+    /** Off by default: HSTS would make browsers refuse the plain-HTTP address the server also offers. */
+    @Value("${eduplay.hsts-enabled:false}")
+    private boolean hstsEnabled;
+
     /**
      * Actuator runs on the separate management port (8081 by default), which is not published
      * outside the Docker network. Only health, info and prometheus are exposed there.
@@ -73,7 +77,13 @@ public class SecurityConfig {
                                         + "object-src 'none'; frame-ancestors 'none'; base-uri 'none'"))
                         .referrerPolicy(r -> r.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER))
                         .frameOptions(frame -> frame.deny())
-                        .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000))
+                        .httpStrictTransportSecurity(hsts -> {
+                            if (hstsEnabled) {
+                                hsts.includeSubDomains(true).maxAgeInSeconds(31536000);
+                            } else {
+                                hsts.disable();
+                            }
+                        })
                         .addHeaderWriter(new StaticHeadersWriter("Permissions-Policy",
                                 "camera=(), microphone=(), geolocation=(), payment=()")))
                 .authorizeHttpRequests(auth -> auth

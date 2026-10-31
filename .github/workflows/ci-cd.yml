@@ -9,7 +9,7 @@
 # Optional repository variable:  API_DOMAIN    (e.g. api.eduplay.co.zw, with a DNS A record pointing at
 #                                 the instance). Without it the API is served at <ip>.sslip.io, a
 #                                 wildcard DNS name that resolves to the instance IP. Either way Caddy
-#                                 obtains a Let's Encrypt certificate and redirects HTTP to HTTPS.
+#                                 obtains a Let's Encrypt certificate and serves HTTPS and plain HTTP.
 name: CI/CD
 
 on:
@@ -150,7 +150,8 @@ jobs:
         run: |
           curl -fsS --retry 24 --retry-delay 5 --retry-all-errors "https://$API_DOMAIN/livez"
           echo
-          test "$(curl -s -o /dev/null -w '%{http_code}' "http://$API_DOMAIN/livez")" = 308
+          curl -fsS "http://$API_DOMAIN/livez"
+          echo
           echo "### Deployed \`${GITHUB_SHA::12}\` to https://$API_DOMAIN" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Close SSH connection

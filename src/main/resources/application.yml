@@ -117,6 +117,8 @@ springdoc:
   default-produces-media-type: application/json
 
 eduplay:
+  # Send Strict-Transport-Security. Enable only when the API is reachable exclusively over HTTPS.
+  hsts-enabled: ${HSTS_ENABLED:false}
   jwt:
     secret: ${JWT_SECRET:}
     previous-secrets: ${JWT_PREVIOUS_SECRETS:}

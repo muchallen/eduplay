@@ -3,8 +3,8 @@
 # pipeline (or by hand): sudo /opt/eduplay/deploy.sh <registry>/<repo>:<tag> [site-address]
 #
 # site-address is the public host name, e.g. api.example.com. Caddy then obtains a Let's Encrypt
-# certificate, serves HTTPS on 443 and redirects HTTP to HTTPS. Omitted, the current value in .env
-# is kept (":80", plain HTTP, on a fresh host).
+# certificate and serves the API on both HTTPS (443) and plain HTTP (80), without redirecting.
+# Omitted, the current value in .env is kept (":80", plain HTTP only, on a fresh host).
 #
 # Idempotent. On the first run it creates /opt/eduplay/.env with freshly generated
 # secrets; those secrets never leave the host and later runs never overwrite them.
@@ -68,7 +68,8 @@ set_env() {
 
 set_env APP_IMAGE "$APP_IMAGE"
 if [ -n "$SITE_ADDRESS" ]; then
-  set_env SITE_ADDRESS "$SITE_ADDRESS"
+  # Listing the http:// address explicitly stops Caddy from redirecting HTTP to HTTPS.
+  set_env SITE_ADDRESS "http://$SITE_ADDRESS, https://$SITE_ADDRESS"
 fi
 
 "${COMPOSE[@]}" pull --quiet

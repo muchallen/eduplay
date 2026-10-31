@@ -176,6 +176,7 @@ value. Never commit `.env`.
 | `RATE_LIMIT_ENABLED` | `true` | In-memory login, registration and reset limits |
 | `CORS_ALLOWED_ORIGINS` | empty | Comma-separated browser origins. The Unity app does not need CORS. |
 | `SWAGGER_ENABLED` | `false` (prod) | Expose `/swagger-ui.html` and `/v3/api-docs` |
+| `HSTS_ENABLED` | `false` | Send `Strict-Transport-Security`; enable only when the API is HTTPS-only |
 | `FORWARD_HEADERS_STRATEGY` | `native` in staging/prod | Trust `X-Forwarded-*` from the reverse proxy |
 | `SERVER_PORT` / `MANAGEMENT_PORT` | `8080` / `8081` | API and Actuator ports |
 | `JAVA_OPTS` | see Dockerfile | JVM flags |
@@ -631,7 +632,7 @@ refresh tokens:
 |---|---|---|
 | **Build and test** | PRs and `main` | `./mvnw verify` with Testcontainers PostgreSQL |
 | **Build and push image** | `main` only | Builds the `linux/amd64` image and pushes it to ECR as `eduplay-backend:<commit-sha>`. Tags are immutable. |
-| **Deploy to EC2** | `main` only | Opens SSH to the instance with EC2 Instance Connect, uploads `deploy/`, runs `deploy.sh <image> <domain>`, then smoke-tests `https://<domain>/livez` and the HTTP→HTTPS redirect |
+| **Deploy to EC2** | `main` only | Opens SSH to the instance with EC2 Instance Connect, uploads `deploy/`, runs `deploy.sh <image> <domain>`, then smoke-tests `/livez` over HTTPS and HTTP |
 
 **AWS resources:** region `us-east-1`; ECR repository
 `383975042508.dkr.ecr.us-east-1.amazonaws.com/eduplay-backend` (scan on push, keeps the last 30 images);
@@ -651,8 +652,10 @@ Swagger or CORS, then re-run the latest deployment from the Actions tab or resta
 sudo docker compose -f /opt/eduplay/docker-compose.prod.yml --project-directory /opt/eduplay up -d
 ```
 
-**HTTPS:** the API is always served over HTTPS, and Caddy redirects HTTP to HTTPS with `308`. Caddy obtains and
-renews the Let's Encrypt certificate automatically (ports 80 and 443 must stay open).
+**HTTPS:** the API (and Swagger) is served over both HTTPS and plain HTTP, with no redirect. Caddy obtains and
+renews the Let's Encrypt certificate automatically (ports 80 and 443 must stay open). The Unity app should always
+use the `https://` address, because plain HTTP sends passwords and tokens unencrypted. To force HTTPS later, set
+`SITE_ADDRESS=<host>` (without the `http://` entry) and `HSTS_ENABLED=true` in `/opt/eduplay/.env` and restart.
 
 * Without `API_DOMAIN`, the host name is `<ip-with-dashes>.sslip.io` (for example `54-242-62-156.sslip.io`), a
   public wildcard DNS name that resolves to the instance IP. It works immediately, but it changes whenever the
